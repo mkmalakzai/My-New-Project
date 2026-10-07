@@ -5,4 +5,4 @@ export type DepositRequestDoc={id?:string;userTelegramId:number;amount:number;me
 export type WithdrawRequestDoc={id?:string;userTelegramId:number;amount:number;method:string;destination:string;status:"pending"|"approved"|"rejected";createdAt:number;reserved?:boolean};
 export type TransactionDoc={id?:string;userTelegramId:number;type:string;amount:number;status:string;referenceId?:string;createdAt:number};
 export type PaymentMethod={id:string;name:string;details:string;active:boolean};
-export type AppSettingsDoc={currency:string;currencySymbol:string;referralReward:number;depositInstructions:string;depositMethods:PaymentMethod[];withdrawMethods:PaymentMethod[];channels:{name:string;url:string}[];supportUsername?:string;botUsername?:string;announcement?:string};
+export type AppSettingsDoc={currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;minWithdraw:number;maxWithdraw:number;referralPercent:number;depositInstructions?:string;depositMethods:PaymentMethod[];withdrawMethods:PaymentMethod[];channels:{name:string;url:string}[];supportUsername?:string;botUsername?:string;announcement?:string};
