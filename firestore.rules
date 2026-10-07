@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // This starter ruleset intentionally blocks all client writes until
+    // Telegram identity verification is wired to a trusted auth layer.
+    // Do NOT loosen these rules for production just to make the UI work.
+
+    match /publicConfig/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /vipPlans/{planId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
