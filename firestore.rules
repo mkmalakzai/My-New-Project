@@ -5,7 +5,7 @@ service cloud.firestore {
     function tid(){ return request.auth.token.telegram_id; }
     function admin(){ return signed() && request.auth.token.admin == true; }
 
-    match /publicConfig/{id}{ allow read: if true; allow write: if admin(); }
+    match /publicConfig/{id}{ allow read: if true; allow write: if admin(); }\n    match /storageMeta/{id}{ allow read: if admin(); allow write: if admin(); }
     match /vipPlans/{id}{ allow read: if true; allow write: if admin(); }
     match /users/{id}{
       allow read: if admin() || (signed() && id == string(tid()));
