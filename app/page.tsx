@@ -1,172 +1,37 @@
 "use client";
+import {useEffect,useMemo,useState} from "react";
+import {AnimatePresence,motion} from "framer-motion";
+import {ArrowDownToLine,ArrowUpFromLine,Bell,ChevronRight,Crown,Home,ShieldCheck,Users,WalletCards,Copy,Gift,History,Settings,LogOut} from "lucide-react";
+import {adminApproveDeposit,adminApproveWithdrawal,adminCreatePlan,adminList,adminTogglePlan,buyVip,claimVip,createDeposit,createWithdrawal,ensureUser,getActiveVipPlans,getAllVipPlans,getMyVip,getReferrals,getTransactions,getUser} from "@/lib/firestore";
+import type {TransactionDoc,UserDoc,VipPlanDoc,VipPurchaseDoc} from "@/lib/models";
 
-import { useEffect, useMemo, useState } from "react";
-import { Crown, Home, Users, WalletCards, ArrowDownToLine, ArrowUpFromLine, Bell, ChevronRight, ShieldCheck } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+type Tab="home"|"vip"|"referral"|"wallet"|"admin";
+type TgUser={id:number;first_name:string;username?:string;photo_url?:string};
+declare global{interface Window{Telegram?:{WebApp?:{initData?:string;initDataUnsafe?:{user?:TgUser;start_param?:string};ready?:()=>void;expand?:()=>void;setHeaderColor?:(c:string)=>void;setBackgroundColor?:(c:string)=>void;openTelegramLink?:(u:string)=>void;showAlert?:(m:string)=>void}}}}
 
-type Tab = "home" | "vip" | "referral" | "wallet";
+const usd=(n:number)=>"$"+Number(n||0).toFixed(2);
+const toast=(m:string)=>window.Telegram?.WebApp?.showAlert?.(m) || alert(m);
 
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        initData?: string;
-        initDataUnsafe?: { user?: { id?: number; first_name?: string; username?: string; photo_url?: string } };
-        ready?: () => void;
-        expand?: () => void;
-        setHeaderColor?: (color: string) => void;
-        setBackgroundColor?: (color: string) => void;
-      };
-    };
-  }
+export default function App(){
+ const [tab,setTab]=useState<Tab>("home"),[allowed,setAllowed]=useState<boolean|null>(null),[tg,setTg]=useState<TgUser|null>(null),[user,setUser]=useState<UserDoc|null>(null),[plans,setPlans]=useState<VipPlanDoc[]>([]),[vips,setVips]=useState<VipPurchaseDoc[]>([]),[txs,setTxs]=useState<TransactionDoc[]>([]),[refs,setRefs]=useState<any[]>([]),[busy,setBusy]=useState(false);
+ const adminId=Number(process.env.NEXT_PUBLIC_ADMIN_TELEGRAM_ID||0);
+ const isAdmin=!!tg && (tg.id===adminId || user?.isAdmin===true);
+ async function refresh(id:number){const [u,p,v,t,r]=await Promise.all([getUser(id),getActiveVipPlans(),getMyVip(id),getTransactions(id),getReferrals(id)]);setUser(u);setPlans(p);setVips(v);setTxs(t);setRefs(r)}
+ useEffect(()=>{(async()=>{const w=window.Telegram?.WebApp,inside=Boolean(w?.initData&&w.initDataUnsafe?.user?.id);setAllowed(inside);if(!inside||!w?.initDataUnsafe?.user)return;w.ready?.();w.expand?.();w.setHeaderColor?.("#080808");w.setBackgroundColor?.("#080808");const t=w.initDataUnsafe.user;setTg(t);const raw=w.initDataUnsafe.start_param||"";const ref=raw.startsWith("ref_")?Number(raw.slice(4)):null;await ensureUser(t,ref);await refresh(t.id)})().catch(e=>toast(e.message))},[]);
+ const page=useMemo(()=>{if(!tg)return null;const props={tg,user,plans,vips,txs,refs,refresh:()=>refresh(tg.id),setTab,setBusy,busy};if(tab==="vip")return <Vip {...props}/>;if(tab==="referral")return <Referral {...props}/>;if(tab==="wallet")return <Wallet {...props}/>;if(tab==="admin"&&isAdmin)return <Admin tg={tg}/>;return <Dashboard {...props}/>},[tab,tg,user,plans,vips,txs,refs,busy,isAdmin]);
+ if(allowed===null)return <main className="gate"><div className="lion-loader">🦁</div><p>Opening AFGlion...</p></main>;
+ if(!allowed)return <main className="gate"><div className="gate-card"><div className="lion-mark">🦁</div><h1>AFGlion</h1><p>Available only inside Telegram.</p><span>Open this Mini App from the official AFGlion bot.</span></div></main>;
+ return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-icon">🦁</div><div><b>AFG<span>lion</span></b><small>Premium Finance</small></div></div><div className="top-actions">{isAdmin&&<button className="admin-chip" onClick={()=>setTab("admin")}>Admin</button>}<button className="icon-button"><Bell size={18}/></button></div></header>
+ <AnimatePresence mode="wait"><motion.section key={tab} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="page">{page}</motion.section></AnimatePresence>
+ {tab!=="admin"&&<nav className="bottom-nav"><Nav a={tab==="home"} l="Home" i={<Home/>} c={()=>setTab("home")}/><Nav a={tab==="vip"} l="VIP" i={<Crown/>} c={()=>setTab("vip")}/><Nav a={tab==="referral"} l="Referral" i={<Users/>} c={()=>setTab("referral")}/><Nav a={tab==="wallet"} l="Wallet" i={<WalletCards/>} c={()=>setTab("wallet")}/></nav>}</main>
 }
-
-const vipPlans = [
-  { name: "Lion Starter", price: 25, daily: 0.35, days: 30, badge: "START" },
-  { name: "Lion Pro", price: 100, daily: 1.7, days: 45, badge: "POPULAR" },
-  { name: "Lion Elite", price: 300, daily: 6.2, days: 60, badge: "ELITE" },
-];
-
-export default function AFGlionApp() {
-  const [tab, setTab] = useState<Tab>("home");
-  const [telegramOnly, setTelegramOnly] = useState<boolean | null>(null);
-  const [name, setName] = useState("Lion Member");
-
-  useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    const insideTelegram = Boolean(tg?.initData);
-    setTelegramOnly(insideTelegram);
-
-    if (insideTelegram && tg) {
-      tg.ready?.();
-      tg.expand?.();
-      tg.setHeaderColor?.("#090909");
-      tg.setBackgroundColor?.("#090909");
-      const user = tg.initDataUnsafe?.user;
-      if (user?.first_name) setName(user.first_name);
-    }
-  }, []);
-
-  const page = useMemo(() => {
-    if (tab === "vip") return <VipPage />;
-    if (tab === "referral") return <ReferralPage />;
-    if (tab === "wallet") return <WalletPage />;
-    return <Dashboard name={name} onNavigate={setTab} />;
-  }, [tab, name]);
-
-  if (telegramOnly === null) {
-    return <main className="gate"><div className="lion-loader">🦁</div><p>Opening AFGlion...</p></main>;
-  }
-
-  if (!telegramOnly) {
-    return (
-      <main className="gate">
-        <div className="gate-card">
-          <div className="lion-mark">🦁</div>
-          <h1>AFGlion</h1>
-          <p>This app is available only inside Telegram.</p>
-          <span>Open AFGlion from the official Telegram bot.</span>
-        </div>
-      </main>
-    );
-  }
-
-  return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand"><div className="brand-icon">🦁</div><div><b>AFG<span>lion</span></b><small>Premium Finance</small></div></div>
-        <button className="icon-button"><Bell size={20} /></button>
-      </header>
-
-      <AnimatePresence mode="wait">
-        <motion.section key={tab} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: .22 }} className="page">
-          {page}
-        </motion.section>
-      </AnimatePresence>
-
-      <nav className="bottom-nav">
-        <NavButton active={tab === "home"} label="Home" icon={<Home size={21}/>} onClick={() => setTab("home")} />
-        <NavButton active={tab === "vip"} label="VIP" icon={<Crown size={21}/>} onClick={() => setTab("vip")} />
-        <NavButton active={tab === "referral"} label="Referral" icon={<Users size={21}/>} onClick={() => setTab("referral")} />
-        <NavButton active={tab === "wallet"} label="Wallet" icon={<WalletCards size={21}/>} onClick={() => setTab("wallet")} />
-      </nav>
-    </main>
-  );
-}
-
-function NavButton({active,label,icon,onClick}:{active:boolean;label:string;icon:React.ReactNode;onClick:()=>void}) {
-  return <button onClick={onClick} className={active ? "nav-item active" : "nav-item"}>{icon}<span>{label}</span></button>
-}
-
-function Dashboard({name,onNavigate}:{name:string;onNavigate:(tab:Tab)=>void}) {
-  return <>
-    <div className="hello"><div><small>Welcome back</small><h1>{name} 👋</h1></div><div className="avatar">🦁</div></div>
-    <div className="balance-card">
-      <div className="glow"/>
-      <div className="balance-head"><span>Total Balance</span><ShieldCheck size={18}/></div>
-      <h2>$0.00</h2>
-      <p>Available balance</p>
-      <div className="balance-actions">
-        <button onClick={() => onNavigate("wallet")}><ArrowDownToLine size={17}/> Deposit</button>
-        <button onClick={() => onNavigate("wallet")}><ArrowUpFromLine size={17}/> Withdraw</button>
-      </div>
-    </div>
-
-    <div className="stats-grid">
-      <Stat title="VIP Profit" value="$0.00" hint="Total earned" />
-      <Stat title="Referral" value="$0.00" hint="Total rewards" />
-    </div>
-
-    <SectionTitle title="Active VIP" action="View plans" onClick={() => onNavigate("vip")} />
-    <div className="empty-card"><Crown size={28}/><b>No active package</b><span>Choose a VIP plan to get started.</span><button onClick={() => onNavigate("vip")}>Explore VIP</button></div>
-
-    <SectionTitle title="Recent Activity" />
-    <div className="activity-card">
-      <div className="activity-icon"><WalletCards size={18}/></div>
-      <div><b>Wallet ready</b><span>Your AFGlion wallet is active</span></div>
-      <small>Now</small>
-    </div>
-  </>
-}
-
-function VipPage() {
-  return <>
-    <div className="page-title"><div><small>Grow with AFGlion</small><h1>VIP Packages 👑</h1></div></div>
-    <div className="vip-hero"><span>PREMIUM ACCESS</span><h2>Choose your Lion level</h2><p>Package terms are configured by the AFGlion admin.</p></div>
-    <div className="plans">
-      {vipPlans.map((p) => <div className="plan-card" key={p.name}>
-        <div className="plan-top"><div><span className="pill">{p.badge}</span><h3>{p.name}</h3></div><Crown size={25}/></div>
-        <div className="plan-price"><b>${p.price}</b><span>package price</span></div>
-        <div className="plan-details"><div><span>Daily reward</span><b>${p.daily}</b></div><div><span>Duration</span><b>{p.days} days</b></div></div>
-        <button>Activate Package <ChevronRight size={18}/></button>
-      </div>)}
-    </div>
-  </>
-}
-
-function ReferralPage() {
-  return <>
-    <div className="page-title"><div><small>Invite & grow</small><h1>Referral Network 👥</h1></div></div>
-    <div className="referral-card"><div className="glow"/><span>Total Referral Rewards</span><h2>$0.00</h2><p>Build your network and earn configured rewards.</p></div>
-    <div className="stats-grid"><Stat title="Total Referrals" value="0" hint="All invited users"/><Stat title="Active" value="0" hint="Qualified users"/></div>
-    <div className="share-card"><b>Your referral link</b><div className="link-box"><span>Available after bot setup</span><button>Copy</button></div><button className="gold-button">Invite Friends</button></div>
-  </>
-}
-
-function WalletPage() {
-  return <>
-    <div className="page-title"><div><small>Secure money center</small><h1>My Wallet 💳</h1></div></div>
-    <div className="wallet-balance"><span>Available Balance</span><h2>$0.00</h2><small>USD</small></div>
-    <div className="wallet-actions-grid"><button><ArrowDownToLine size={22}/><b>Deposit</b><span>Manual funding</span></button><button><ArrowUpFromLine size={22}/><b>Withdraw</b><span>Manual request</span></button></div>
-    <SectionTitle title="Transactions" />
-    <div className="empty-list"><WalletCards size={28}/><b>No transactions yet</b><span>Your deposit, withdrawal and VIP activity will appear here.</span></div>
-  </>
-}
-
-function Stat({title,value,hint}:{title:string;value:string;hint:string}) {
-  return <div className="stat-card"><span>{title}</span><b>{value}</b><small>{hint}</small></div>
-}
-
-function SectionTitle({title,action,onClick}:{title:string;action?:string;onClick?:()=>void}) {
-  return <div className="section-title"><h3>{title}</h3>{action && <button onClick={onClick}>{action}<ChevronRight size={15}/></button>}</div>
-}
+function Nav({a,l,i,c}:{a:boolean;l:string;i:React.ReactNode;c:()=>void}){return <button className={"nav-item "+(a?"active":"")} onClick={c}>{i}<span>{l}</span></button>}
+function Dashboard(p:any){const active=p.vips.find((v:VipPurchaseDoc)=>v.status==="active");return <><div className="hello"><div><small>Welcome back</small><h1>{p.tg.first_name} 👋</h1></div><div className="avatar">{p.tg.photo_url?<img src={p.tg.photo_url}/>: "🦁"}</div></div><div className="balance-card"><div className="glow"/><div className="balance-head"><span>Total Balance</span><ShieldCheck/></div><h2>{usd(p.user?.balance)}</h2><p>Available balance</p><div className="balance-actions"><button onClick={()=>p.setTab("wallet")}><ArrowDownToLine/>Deposit</button><button onClick={()=>p.setTab("wallet")}><ArrowUpFromLine/>Withdraw</button></div></div><div className="stats-grid"><Stat t="VIP Profit" v={usd(p.user?.totalVipProfit)} h="Total claimed"/><Stat t="Referral" v={usd(p.user?.referralEarnings)} h="Total rewards"/></div><Title t="Active VIP" a="View plans" c={()=>p.setTab("vip")}/>{active?<div className="active-vip"><Crown/><div><b>{active.planName}</b><span>{usd(active.dailyReward)} daily • ends {new Date(active.endAt).toLocaleDateString()}</span></div></div>:<Empty icon={<Crown/>} title="No active package" text="Choose a VIP package to get started."/>}<Title t="Recent Activity"/>{p.txs.slice(0,3).map((x:TransactionDoc)=><Tx key={x.id} x={x}/>)}{!p.txs.length&&<Empty icon={<History/>} title="No activity yet" text="Your account activity will appear here."/>}</>}
+function Vip(p:any){async function buy(plan:VipPlanDoc){try{p.setBusy(true);await buyVip(p.tg.id,plan);await p.refresh();toast("VIP package activated.")}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}async function claim(v:VipPurchaseDoc){try{p.setBusy(true);const r=await claimVip(p.tg.id,v.id!);await p.refresh();toast("Claimed "+usd(r))}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}return <><div className="page-title"><small>Grow with AFGlion</small><h1>VIP Packages 👑</h1></div>{p.vips.filter((x:VipPurchaseDoc)=>x.status==="active").map((v:VipPurchaseDoc)=><div className="active-vip big" key={v.id}><Crown/><div><b>{v.planName}</b><span>{usd(v.dailyReward)} daily • claimed {usd(v.claimedReward)}</span></div><button disabled={p.busy} onClick={()=>claim(v)}>Claim</button></div>)}<div className="vip-hero"><span>PREMIUM ACCESS</span><h2>Choose your Lion level</h2><p>Packages are managed by AFGlion administration.</p></div><div className="plans">{p.plans.map((x:VipPlanDoc)=><div className="plan-card" key={x.id}><div className="plan-top"><div><span className="pill">{x.badge||"VIP"}</span><h3>{x.name}</h3></div><Crown/></div><div className="plan-price"><b>{usd(x.price)}</b><span>package price</span></div><div className="plan-details"><div><span>Daily reward</span><b>{usd(x.dailyReward)}</b></div><div><span>Duration</span><b>{x.durationDays} days</b></div></div><button disabled={p.busy} onClick={()=>buy(x)}>Activate Package <ChevronRight/></button></div>)}{!p.plans.length&&<Empty icon={<Crown/>} title="No VIP packages" text="Admin has not published a package yet."/>}</div></>}
+function Referral(p:any){const bot=process.env.NEXT_PUBLIC_BOT_USERNAME||"";const link=bot?`https://t.me/${bot}?startapp=ref_${p.tg.id}`:"Set bot username in environment";async function copy(){await navigator.clipboard.writeText(link);toast("Referral link copied.")}return <><div className="page-title"><small>Invite & grow</small><h1>Referral Network 👥</h1></div><div className="referral-card"><div className="glow"/><span>Total Referral Rewards</span><h2>{usd(p.user?.referralEarnings)}</h2><p>Invite friends through your personal AFGlion link.</p></div><div className="stats-grid"><Stat t="Total Referrals" v={String(p.refs.length)} h="Invited users"/><Stat t="Qualified" v={String(p.refs.filter((r:any)=>r.status==="rewarded").length)} h="Rewarded referrals"/></div><div className="share-card"><b>Your referral link</b><div className="link-box"><span>{link}</span><button onClick={copy}><Copy/></button></div><button className="gold-button" onClick={()=>window.Telegram?.WebApp?.openTelegramLink?.(`https://t.me/share/url?url=${encodeURIComponent(link)}`)}>Invite Friends</button></div><Title t="My Referrals"/>{p.refs.map((r:any)=><div className="list-row" key={r.id}><Users/><div><b>User #{r.invitedTelegramId}</b><span>{r.status}</span></div><strong>{usd(r.reward)}</strong></div>)}{!p.refs.length&&<Empty icon={<Users/>} title="No referrals yet" text="Share your link to build your network."/>}</>}
+function Wallet(p:any){const [mode,setMode]=useState<"deposit"|"withdraw"|null>(null),[amount,setAmount]=useState(""),[method,setMethod]=useState("USDT"),[ref,setRef]=useState("");async function submit(e:React.FormEvent){e.preventDefault();try{p.setBusy(true);const n=Number(amount);if(!n||n<=0)throw new Error("Enter a valid amount");if(mode==="deposit")await createDeposit({userTelegramId:p.tg.id,amount:n,method,txid:ref});else await createWithdrawal({userTelegramId:p.tg.id,amount:n,method,destination:ref});setMode(null);setAmount("");setRef("");await p.refresh();toast("Request submitted for admin review.")}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}return <><div className="page-title"><small>Secure money center</small><h1>My Wallet 💳</h1></div><div className="wallet-balance"><span>Available Balance</span><h2>{usd(p.user?.balance)}</h2><small>USD</small></div><div className="wallet-actions-grid"><button onClick={()=>setMode("deposit")}><ArrowDownToLine/><b>Deposit</b><span>Manual funding</span></button><button onClick={()=>setMode("withdraw")}><ArrowUpFromLine/><b>Withdraw</b><span>Manual request</span></button></div>{mode&&<form className="wallet-form" onSubmit={submit}><div className="form-head"><b>{mode==="deposit"?"Deposit Request":"Withdrawal Request"}</b><button type="button" onClick={()=>setMode(null)}>×</button></div><label>Amount USD</label><input inputMode="decimal" required value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00"/><label>Method</label><select value={method} onChange={e=>setMethod(e.target.value)}><option>USDT TRC20</option><option>USDT BEP20</option><option>Manual / Bank</option></select><label>{mode==="deposit"?"TXID / payment reference":"Wallet address / account"}</label><input required value={ref} onChange={e=>setRef(e.target.value)} placeholder="Enter details"/><div className="notice">Manual request • Admin approval required</div><button disabled={p.busy} className="gold-button">Submit Request</button></form>}<Title t="Transactions"/>{p.txs.map((x:TransactionDoc)=><Tx key={x.id} x={x}/>)}{!p.txs.length&&<Empty icon={<WalletCards/>} title="No transactions yet" text="Wallet activity will appear here."/>}</>}
+function Admin({tg}:{tg:TgUser}){const [section,setSection]=useState("overview"),[items,setItems]=useState<any[]>([]),[plans,setPlans]=useState<VipPlanDoc[]>([]),[form,setForm]=useState({name:"",price:"",daily:"",days:"",badge:"VIP"}),[busy,setBusy]=useState(false);async function load(s=section){setSection(s);try{if(s==="vip")setPlans(await getAllVipPlans());else if(s!=="overview")setItems(await adminList(s))}catch(e:any){toast(e.message)}}useEffect(()=>{load("overview")},[]);async function addPlan(e:React.FormEvent){e.preventDefault();try{setBusy(true);await adminCreatePlan(tg.id,{name:form.name,price:Number(form.price),dailyReward:Number(form.daily),durationDays:Number(form.days),badge:form.badge,active:true});setForm({name:"",price:"",daily:"",days:"",badge:"VIP"});await load("vip")}catch(e:any){toast(e.message)}finally{setBusy(false)}}async function review(kind:string,id:string,yes:boolean){try{setBusy(true);kind==="deposits"?await adminApproveDeposit(tg.id,id,yes):await adminApproveWithdrawal(tg.id,id,yes);await load(kind)}catch(e:any){toast(e.message)}finally{setBusy(false)}}return <><div className="admin-head"><div><small>AFGlion Control Center</small><h1>Admin Panel 🦁</h1></div><button onClick={()=>location.reload()}><LogOut/></button></div><div className="admin-tabs"><button onClick={()=>load("overview")}>Overview</button><button onClick={()=>load("users")}>Users</button><button onClick={()=>load("vip")}>VIP</button><button onClick={()=>load("deposits")}>Deposits</button><button onClick={()=>load("withdrawals")}>Withdraw</button></div>{section==="overview"&&<div className="admin-grid"><Stat t="Management" v="Live" h="Firebase connected"/><Stat t="Admin ID" v={String(tg.id)} h="Telegram account"/><div className="admin-note"><Settings/><b>Control Center Ready</b><span>Manage users, VIP packages and manual payment requests from here.</span></div></div>}{section==="vip"&&<><form className="wallet-form" onSubmit={addPlan}><b>Create VIP Package</b><input required placeholder="Package name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><div className="two"><input required inputMode="decimal" placeholder="Price" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/><input required inputMode="decimal" placeholder="Daily reward" value={form.daily} onChange={e=>setForm({...form,daily:e.target.value})}/></div><div className="two"><input required inputMode="numeric" placeholder="Days" value={form.days} onChange={e=>setForm({...form,days:e.target.value})}/><input placeholder="Badge" value={form.badge} onChange={e=>setForm({...form,badge:e.target.value})}/></div><button disabled={busy} className="gold-button">Create Package</button></form>{plans.map(x=><div className="admin-row" key={x.id}><Crown/><div><b>{x.name}</b><span>{usd(x.price)} • {usd(x.dailyReward)}/day • {x.durationDays}d</span></div><button onClick={async()=>{await adminTogglePlan(x.id!,!x.active);load("vip")}}>{x.active?"Disable":"Enable"}</button></div>)}</>}{section!=="overview"&&section!=="vip"&&<>{items.map(x=><div className="admin-row" key={x.id}><WalletCards/><div><b>{x.firstName||x.method||("User #"+x.userTelegramId)}</b><span>{x.status||("@"+(x.username||"no_username"))} {x.amount!=null?" • "+usd(x.amount):""}</span></div>{(section==="deposits"||section==="withdrawals")&&x.status==="pending"?<div className="review"><button disabled={busy} onClick={()=>review(section,x.id,true)}>✓</button><button disabled={busy} onClick={()=>review(section,x.id,false)}>×</button></div>:null}</div>)}{!items.length&&<Empty icon={<WalletCards/>} title="Nothing here" text="No records found in this section."/>}</>}</>}
+function Stat({t,v,h}:{t:string;v:string;h:string}){return <div className="stat-card"><span>{t}</span><b>{v}</b><small>{h}</small></div>}
+function Title({t,a,c}:{t:string;a?:string;c?:()=>void}){return <div className="section-title"><h3>{t}</h3>{a&&<button onClick={c}>{a}<ChevronRight/></button>}</div>}
+function Empty({icon,title,text}:{icon:React.ReactNode;title:string;text:string}){return <div className="empty-card">{icon}<b>{title}</b><span>{text}</span></div>}
+function Tx({x}:{x:TransactionDoc}){return <div className="list-row"><WalletCards/><div><b>{x.type.replaceAll("_"," ")}</b><span>{new Date(x.createdAt).toLocaleDateString()} • {x.status}</span></div><strong className={x.amount>=0?"plus":"minus"}>{x.amount>=0?"+":""}{usd(x.amount)}</strong></div>}
