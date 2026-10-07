@@ -1,24 +1,32 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signed(){ return request.auth != null; }
+    function tid(){ return request.auth.token.telegram_id; }
+    function admin(){ return signed() && request.auth.token.admin == true; }
 
-    // This starter ruleset intentionally blocks all client writes until
-    // Telegram identity verification is wired to a trusted auth layer.
-    // Do NOT loosen these rules for production just to make the UI work.
-
-    match /publicConfig/{docId} {
-      allow read: if true;
-      allow write: if false;
+    match /publicConfig/{id}{ allow read: if true; allow write: if admin(); }
+    match /vipPlans/{id}{ allow read: if true; allow write: if admin(); }
+    match /users/{id}{
+      allow read: if admin() || (signed() && id == string(tid()));
+      allow create: if signed() && id == string(tid());
+      allow update: if admin();
     }
-
-    match /vipPlans/{planId} {
-      allow read: if true;
-      allow write: if false;
+    match /vipPurchases/{id}{
+      allow read: if admin() || (signed() && resource.data.userTelegramId == tid());
+      allow write: if admin();
     }
-
-    match /{document=**} {
-      allow read, write: if false;
+    match /deposits/{id}{
+      allow read: if admin() || (signed() && resource.data.userTelegramId == tid());
+      allow create: if signed() && request.resource.data.userTelegramId == tid() && request.resource.data.status == "pending";
+      allow update: if admin();
     }
+    match /withdrawals/{id}{
+      allow read: if admin() || (signed() && resource.data.userTelegramId == tid());
+      allow write: if admin();
+    }
+    match /transactions/{id}{ allow read: if admin() || (signed() && resource.data.userTelegramId == tid()); allow write: if admin(); }
+    match /referrals/{id}{ allow read: if admin() || (signed() && (resource.data.inviterTelegramId == tid() || resource.data.invitedTelegramId == tid())); allow write: if admin(); }
+    match /{document=**}{ allow read,write: if false; }
   }
 }
