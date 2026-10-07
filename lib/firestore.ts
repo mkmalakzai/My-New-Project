@@ -2,8 +2,9 @@ import {
   addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query,
   runTransaction, setDoc, updateDoc, where
 } from "firebase/firestore";
-import { db, storage } from "./firebase";
+import { db, storage, functions } from "./firebase";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { httpsCallable } from "firebase/functions";
 import type { DepositRequestDoc, TransactionDoc, UserDoc, VipPlanDoc, VipPurchaseDoc, WithdrawRequestDoc } from "./models";
 
 export const money = (n:number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -43,46 +44,25 @@ export async function getMyVip(id:number){const s=await getDocs(query(collection
 export async function getReferrals(id:number){const s=await getDocs(query(collection(db,"referrals"),where("inviterTelegramId","==",id)));return s.docs.map(d=>({id:d.id,...d.data()}));}
 
 export async function createDeposit(data:Omit<DepositRequestDoc,"id"|"status"|"createdAt">){
-  return addDoc(collection(db,"deposits"),{...data,amount:money(data.amount),status:"pending",createdAt:Date.now()});
+  const call=httpsCallable(functions,"createDeposit");
+  const res:any=await call(data);
+  return res.data;
 }
 export async function createWithdrawal(data:Omit<WithdrawRequestDoc,"id"|"status"|"createdAt">){
-  if(data.amount<=0) throw new Error("Invalid amount");
-  const userRef=doc(db,"users",String(data.userTelegramId));
-  const requestRef=doc(collection(db,"withdrawals"));
-  await runTransaction(db,async tx=>{
-    const u=await tx.get(userRef); if(!u.exists()) throw new Error("User not found");
-    const balance=Number(u.data().balance||0); if(balance<data.amount) throw new Error("Insufficient balance");
-    tx.update(userRef,{balance:money(balance-data.amount)});
-    tx.set(requestRef,{...data,amount:money(data.amount),status:"pending",createdAt:Date.now(),reserved:true});
-  });
-  return requestRef;
+  const call=httpsCallable(functions,"createWithdrawal");
+  const res:any=await call(data);
+  return res.data;
 }
 export async function buyVip(userId:number,plan:VipPlanDoc){
   if(!plan.id) throw new Error("Plan missing");
-  const uref=doc(db,"users",String(userId)); const pref=doc(db,"vipPlans",plan.id); const purchase=doc(collection(db,"vipPurchases")); const tr=doc(collection(db,"transactions"));
-  await runTransaction(db,async tx=>{
-    const [u,p]=await Promise.all([tx.get(uref),tx.get(pref)]);
-    if(!u.exists()||!p.exists()||p.data().active!==true) throw new Error("Plan unavailable");
-    const price=Number(p.data().price||0), balance=Number(u.data().balance||0); if(balance<price) throw new Error("Insufficient balance");
-    const now=Date.now(),days=Number(p.data().durationDays||0);
-    tx.update(uref,{balance:money(balance-price)});
-    tx.set(purchase,{userTelegramId:userId,planId:pref.id,planName:p.data().name,price,dailyReward:Number(p.data().dailyReward||0),durationDays:days,startAt:now,endAt:now+days*86400000,status:"active",claimedReward:0,lastClaimAt:now});
-    tx.set(tr,{userTelegramId:userId,type:"vip_purchase",amount:-price,status:"completed",referenceId:purchase.id,createdAt:now});
-  });
+  const call=httpsCallable(functions,"buyVip");
+  const res:any=await call({planId:plan.id});
+  return res.data;
 }
 export async function claimVip(userId:number,purchaseId:string){
-  const uref=doc(db,"users",String(userId)), vref=doc(db,"vipPurchases",purchaseId), tr=doc(collection(db,"transactions"));
-  return runTransaction(db,async tx=>{
-    const [u,v]=await Promise.all([tx.get(uref),tx.get(vref)]); if(!u.exists()||!v.exists()) throw new Error("Not found");
-    const d=v.data(); if(d.userTelegramId!==userId||d.status!=="active") throw new Error("Not active");
-    const now=Date.now(),effective=Math.min(now,Number(d.endAt)),last=Number(d.lastClaimAt||d.startAt);
-    const days=Math.floor((effective-last)/86400000); if(days<1) throw new Error("No reward available yet");
-    const reward=money(days*Number(d.dailyReward||0)),balance=Number(u.data().balance||0);
-    tx.update(uref,{balance:money(balance+reward),totalVipProfit:money(Number(u.data().totalVipProfit||0)+reward)});
-    tx.update(vref,{claimedReward:money(Number(d.claimedReward||0)+reward),lastClaimAt:last+days*86400000,status:now>=Number(d.endAt)?"completed":"active"});
-    tx.set(tr,{userTelegramId:userId,type:"vip_profit",amount:reward,status:"completed",referenceId:purchaseId,createdAt:now});
-    return reward;
-  });
+  const call=httpsCallable(functions,"claimVip");
+  const res:any=await call({purchaseId});
+  return Number(res.data?.reward||0);
 }
 
 export async function adminCreatePlan(adminId:number,p:Omit<VipPlanDoc,"id"|"createdAt">){return addDoc(collection(db,"vipPlans"),{...p,createdBy:adminId,createdAt:Date.now()});}
