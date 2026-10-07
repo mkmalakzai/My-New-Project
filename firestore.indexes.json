@@ -1,0 +1,8 @@
+{
+  "indexes": [
+    {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"userTelegramId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"vipPurchases","queryScope":"COLLECTION","fields":[{"fieldPath":"userTelegramId","order":"ASCENDING"},{"fieldPath":"startAt","order":"DESCENDING"}]},
+    {"collectionGroup":"referrals","queryScope":"COLLECTION","fields":[{"fieldPath":"inviterTelegramId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]}
+  ],
+  "fieldOverrides": []
+}
