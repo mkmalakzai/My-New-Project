@@ -2,7 +2,7 @@ import {
   addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query,
   runTransaction, setDoc, updateDoc, where
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { db, storage } from "./firebase";\nimport { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import type { DepositRequestDoc, TransactionDoc, UserDoc, VipPlanDoc, VipPurchaseDoc, WithdrawRequestDoc } from "./models";
 
 export const money = (n:number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -34,7 +34,7 @@ export async function ensureUser(tg:{id:number;first_name:string;username?:strin
 export async function getUser(id:number){const s=await getDoc(doc(db,"users",String(id)));return s.exists()?s.data() as UserDoc:null;}
 export async function getActiveVipPlans(){const s=await getDocs(query(collection(db,"vipPlans"),where("active","==",true)));return s.docs.map(d=>({id:d.id,...d.data()} as VipPlanDoc));}
 export async function getAllVipPlans(){const s=await getDocs(collection(db,"vipPlans"));return s.docs.map(d=>({id:d.id,...d.data()} as VipPlanDoc));}
-export async function getPublicSettings(){const s=await getDoc(doc(db,"publicConfig","app"));return s.exists()?s.data():null;}
+export async function getPublicSettings(){const s=await getDoc(doc(db,"publicConfig","app"));return s.exists()?s.data():null;}\nexport async function savePublicSettings(settings:any){return setDoc(doc(db,"publicConfig","app"),settings,{merge:true});}\nexport async function uploadDepositProof(userId:number,file:File){const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");const r=storageRef(storage,`deposit-proofs/${userId}/${Date.now()}-${safe}`);await uploadBytes(r,file,{contentType:file.type});return getDownloadURL(r);}
 export async function getTransactions(id:number){const s=await getDocs(query(collection(db,"transactions"),where("userTelegramId","==",id),limit(50)));return s.docs.map(d=>({id:d.id,...d.data()} as TransactionDoc)).sort((a,b)=>b.createdAt-a.createdAt);}
 export async function getMyVip(id:number){const s=await getDocs(query(collection(db,"vipPurchases"),where("userTelegramId","==",id)));return s.docs.map(d=>({id:d.id,...d.data()} as VipPurchaseDoc)).sort((a,b)=>b.startAt-a.startAt);}
 export async function getReferrals(id:number){const s=await getDocs(query(collection(db,"referrals"),where("inviterTelegramId","==",id)));return s.docs.map(d=>({id:d.id,...d.data()}));}
