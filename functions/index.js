@@ -43,16 +43,17 @@ exports.authenticateTelegram = onCall({secrets:[BOT_TOKEN]}, async req=>{
   const referredBy=refRaw.startsWith("ref_")?Number(refRaw.slice(4)):Number(refRaw)||null;
   await db.runTransaction(async tx=>{
     const us=await tx.get(userRef);
+    let rr=null,rs=null,inviter=null,inv=null;
+    if(!us.exists && referredBy && referredBy!==user.id){
+      rr=db.doc("referrals/"+referredBy+"_"+user.id);
+      inviter=db.doc("users/"+referredBy);
+      [rs,inv]=await Promise.all([tx.get(rr),tx.get(inviter)]);
+    }
     if(!us.exists){
       tx.set(userRef,{telegramId:user.id,firstName:user.first_name||"User",username:user.username||"",photoUrl:user.photo_url||"",balance:0,totalVipProfit:0,referralEarnings:0,totalReferrals:0,referredBy:referredBy&&referredBy!==user.id?referredBy:null,isBanned:false,isAdmin:user.id===ADMIN_TELEGRAM_ID,createdAt:Date.now()});
-      if(referredBy && referredBy!==user.id){
-        const rr=db.doc("referrals/"+referredBy+"_"+user.id);
-        const rs=await tx.get(rr);
-        if(!rs.exists){
-          tx.set(rr,{inviterTelegramId:referredBy,invitedTelegramId:user.id,status:"joined",reward:0,createdAt:Date.now()});
-          const inviter=db.doc("users/"+referredBy), inv=await tx.get(inviter);
-          if(inv.exists) tx.update(inviter,{totalReferrals:Number(inv.data().totalReferrals||0)+1});
-        }
+      if(rr && rs && !rs.exists){
+        tx.set(rr,{inviterTelegramId:referredBy,invitedTelegramId:user.id,status:"joined",reward:0,createdAt:Date.now()});
+        if(inviter && inv?.exists) tx.update(inviter,{totalReferrals:Number(inv.data().totalReferrals||0)+1});
       }
     }else{
       tx.update(userRef,{firstName:user.first_name||"User",username:user.username||"",photoUrl:user.photo_url||"",isAdmin:user.id===ADMIN_TELEGRAM_ID});
@@ -99,20 +100,22 @@ exports.buyVip = onCall(async req=>{
     if(!u.exists||!p.exists||p.data().active!==true) throw new HttpsError("not-found","Package unavailable");
     const price=money(p.data().price), balance=Number(u.data().balance||0); if(balance<price) throw new HttpsError("failed-precondition","Insufficient balance");
     const now=Date.now(),days=Number(p.data().durationDays||0),daily=money(p.data().dailyReward||0);
+    const refId=Number(u.data().referredBy||0), percent=Math.max(0,Math.min(100,Number(cfgSnap.exists?cfgSnap.data().referralPercent||0:0)));
+    let inviter=null,inv=null,rr=null,rs=null;
+    if(refId && percent>0){
+      inviter=db.doc("users/"+refId);
+      rr=db.doc("referrals/"+refId+"_"+userId);
+      [inv,rs]=await Promise.all([tx.get(inviter),tx.get(rr)]);
+    }
     tx.update(uref,{balance:money(balance-price)});
     tx.set(purchase,{userTelegramId:userId,planId,planName:p.data().name,price,dailyReward:daily,durationDays:days,startAt:now,endAt:now+days*86400000,status:"active",claimedReward:0,lastClaimAt:now});
     tx.set(tr,{userTelegramId:userId,type:"vip_purchase",amount:-price,status:"completed",referenceId:purchase.id,createdAt:now});
-    const refId=Number(u.data().referredBy||0), percent=Math.max(0,Number(cfgSnap.exists?cfgSnap.data().referralPercent||0:0));
-    if(refId && percent>0){
-      const inviter=db.doc("users/"+refId), inv=await tx.get(inviter);
-      if(inv.exists){
-        const reward=money(price*percent/100);
-        if(reward>0){
-          tx.update(inviter,{balance:money(Number(inv.data().balance||0)+reward),referralEarnings:money(Number(inv.data().referralEarnings||0)+reward)});
-          const rr=db.doc("referrals/"+refId+"_"+userId), rs=await tx.get(rr);
-          if(rs.exists) tx.update(rr,{status:"rewarded",reward:money(Number(rs.data().reward||0)+reward),lastRewardAt:now});
-          tx.set(db.collection("transactions").doc(),{userTelegramId:refId,type:"referral_commission",amount:reward,status:"completed",referenceId:purchase.id,createdAt:now});
-        }
+    if(inviter && inv?.exists){
+      const reward=money(price*percent/100);
+      if(reward>0){
+        tx.update(inviter,{balance:money(Number(inv.data().balance||0)+reward),referralEarnings:money(Number(inv.data().referralEarnings||0)+reward)});
+        if(rr && rs?.exists) tx.update(rr,{status:"rewarded",reward:money(Number(rs.data().reward||0)+reward),lastRewardAt:now});
+        tx.set(db.collection("transactions").doc(),{userTelegramId:refId,type:"referral_commission",amount:reward,status:"completed",referenceId:purchase.id,createdAt:now});
       }
     }
   });
