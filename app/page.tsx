@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import {AnimatePresence,motion} from "framer-motion";
-import {ArrowDownToLine,ArrowUpFromLine,Bell,ChevronRight,Crown,Home,ShieldCheck,Users,WalletCards,Copy,Gift,History,Settings,LogOut,Image as ImageIcon,Radio,Coins} from "lucide-react";
+import {ArrowDownToLine,ArrowUpFromLine,Bell,ChevronRight,Crown,Home,ShieldCheck,Users,WalletCards,Copy,History,Settings,LogOut,Image as ImageIcon,Radio} from "lucide-react";
 import {adminApproveDeposit,adminApproveWithdrawal,adminCreatePlan,adminList,adminTogglePlan,buyVip,claimVip,createDeposit,createWithdrawal,ensureUser,getActiveVipPlans,getAllVipPlans,getMyVip,getReferrals,getTransactions,getUser,getPublicSettings,savePublicSettings,uploadDepositProof} from "@/lib/firestore";
 import type {TransactionDoc,UserDoc,VipPlanDoc,VipPurchaseDoc} from "@/lib/models";
 
@@ -10,7 +10,7 @@ type TgUser={id:number;first_name:string;username?:string;photo_url?:string};
 declare global{interface Window{Telegram?:{WebApp?:{initData?:string;initDataUnsafe?:{user?:TgUser;start_param?:string};ready?:()=>void;expand?:()=>void;setHeaderColor?:(c:string)=>void;setBackgroundColor?:(c:string)=>void;openTelegramLink?:(u:string)=>void;showAlert?:(m:string)=>void}}}}
 
 const usd=(n:number)=>"$"+Number(n||0).toFixed(2);
-const toast=(m:string)=>window.Telegram?.WebApp?.showAlert?.(m) || alert(m);
+const toast=(m:string)=>{const showAlert=window.Telegram?.WebApp?.showAlert;if(showAlert){showAlert(m);return;}window.alert(m);};
 
 export default function App(){
  const [tab,setTab]=useState<Tab>("home"),[allowed,setAllowed]=useState<boolean|null>(null),[tg,setTg]=useState<TgUser|null>(null),[user,setUser]=useState<UserDoc|null>(null),[plans,setPlans]=useState<VipPlanDoc[]>([]),[vips,setVips]=useState<VipPurchaseDoc[]>([]),[txs,setTxs]=useState<TransactionDoc[]>([]),[refs,setRefs]=useState<any[]>([]),[settings,setSettings]=useState<any>({currency:"USD",currencySymbol:"$",depositMethods:[{id:"usdt",name:"USDT",details:"Contact admin for address",active:true}],withdrawMethods:[{id:"usdt",name:"USDT",details:"",active:true}],channels:[]}),[busy,setBusy]=useState(false);
