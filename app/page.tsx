@@ -468,7 +468,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId,ref
     finally{setBusy(false)}
   }
   async function saveSettings(){
-    await run(()=>adminSaveSettingsBackend(draft.settings),"Settings saved");
+    await run(()=>adminSaveSettingsBackend({...draft.settings,channels:(draft.settings.channels||[]).filter((x:any)=>x?.name&&x?.url).slice(0,2)}),"Settings saved");
   }
   async function addPlan(e:React.FormEvent){
     e.preventDefault();
