@@ -94,3 +94,40 @@ radial-gradient(circle at 0 30%,rgba(228,182,84,.045),transparent 22%),#080808}
   .channel-grid,.method-grid,.method-picks{grid-template-columns:1fr}.two,.channel-edit{grid-template-columns:1fr}
   .method-line{flex-wrap:wrap}.method-line select{width:100px}
 }
+
+/* payment number + full request cards */
+.method-number-edit{display:grid;gap:5px}.method-number-edit label{font-size:7px;color:#8e826d}.method-number-edit input{font-size:12px!important;font-weight:800;letter-spacing:.4px;color:#f1d58e!important;border-color:#3b3020!important;background:#110f0b!important}
+
+.payment-number-card{padding:14px;border:1px solid rgba(228,182,84,.28);border-radius:15px;background:linear-gradient(145deg,#1a160e,#0e0e0d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.015)}
+.payment-number-card>small{display:block;font-size:7px;letter-spacing:1.2px;color:#9d8149}
+.payment-number-card>div{display:flex;align-items:center;gap:10px;margin-top:7px}
+.payment-number-card b{flex:1;min-width:0;font-size:20px;line-height:1.1;letter-spacing:.5px;color:#f4d98f;word-break:break-all}
+.payment-number-card button{display:flex;align-items:center;gap:5px;flex:none;padding:9px 11px;border:1px solid #49391d;border-radius:10px;background:#20190d;color:#e2b654;font-size:8px;font-weight:800}
+.payment-number-card button:disabled{opacity:.4;cursor:not-allowed}
+.payment-number-card button svg{width:13px}
+
+.request-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.request-summary>div{padding:11px 8px;border:1px solid #222;border-radius:13px;background:#101010;text-align:center}
+.request-summary span,.request-summary b{display:block}.request-summary span{font-size:7px;color:#77736c}.request-summary b{margin-top:4px;font-size:16px}
+
+.request-card{margin-bottom:11px;padding:14px;border:1px solid #252525;border-radius:18px;background:linear-gradient(145deg,#111,#0d0d0d)}
+.request-card-head{display:flex;align-items:center;gap:10px;padding-bottom:11px;border-bottom:1px solid #1d1d1d}
+.request-card-head>div{flex:1}.request-card-head small,.request-card-head b{display:block}.request-card-head small{font-size:7px;letter-spacing:.9px;color:#84765a}.request-card-head b{margin-top:3px;font-size:18px}
+.request-status{padding:5px 8px;border-radius:99px;border:1px solid #333;background:#171717;font-size:7px;text-transform:uppercase;font-weight:800}
+.request-status.pending{border-color:#4a381b;background:#1b150a;color:#d8aa4d}.request-status.approved{border-color:#294027;background:#111b11;color:#86b97a}.request-status.rejected{border-color:#422626;background:#1b1010;color:#dc8585}
+.request-user{display:flex;align-items:center;gap:9px;padding:11px 0}
+.request-user-avatar{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:#17140d;color:#d2a84e;border:1px solid rgba(228,182,84,.12)}
+.request-user-avatar svg{width:16px}.request-user>div{flex:1}.request-user b,.request-user small{display:block}.request-user b{font-size:10px}.request-user small{margin-top:2px;font-size:7px;color:#6d6962}
+.request-details{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.request-details>div{padding:9px;border:1px solid #1f1f1f;border-radius:11px;background:#0b0b0b;min-width:0}
+.request-details span,.request-details b{display:block}.request-details span{font-size:6px;color:#6e6a63}.request-details b{margin-top:4px;font-size:8px;line-height:1.35;word-break:break-word}.request-details .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#bfa56d}
+.request-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}
+.request-actions button{display:flex;align-items:center;justify-content:center;gap:5px;padding:10px;border-radius:11px;font-size:8px;font-weight:800}
+.request-actions svg{width:13px}.request-actions .approve{border:1px solid #2e472a;background:#121b11;color:#8abd7c}.request-actions .reject{border:1px solid #482626;background:#1b1010;color:#db8585}
+.processed-note{display:flex;align-items:center;gap:6px;margin-top:11px;padding:9px;border:1px solid #222;border-radius:10px;background:#0d0d0d;color:#77736c;font-size:7px}.processed-note svg{width:13px;color:#9c824d}
+
+@media(max-width:390px){
+  .payment-number-card b{font-size:17px}
+  .request-details{grid-template-columns:1fr}
+  .request-summary{gap:5px}.request-summary>div{padding:9px 4px}
+}
