@@ -35,6 +35,7 @@ jobs:
           if [ -n "$FIREBASE_SA_PRIMARY" ]; then
             printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
             echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+            echo "Service account: $(jq -r '.client_email' "$RUNNER_TEMP/firebase-sa.json")"
           elif [ -n "$FIREBASE_SA_FALLBACK" ]; then
             printf '%s' "$FIREBASE_SA_FALLBACK" > "$RUNNER_TEMP/firebase-sa.json"
             echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
