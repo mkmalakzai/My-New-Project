@@ -624,43 +624,69 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId,ref
   </>
 }
 
-function SheetLayer({type,close,state,setState,notify,depositMethods,withdrawMethods,name,username,tgId}:any){
+function SheetLayer({type,close,state,setState,notify,depositMethods,withdrawMethods,name,username,tgId,refresh}:any){
   if(type==="notifications")return <Modal close={close}><div className="sheet-head"><div><small>AFGLION</small><h3>Notifications</h3></div><button onClick={close}><X/></button></div><section className="notice-list"><div><Bell/><span><b>Welcome to AFGlion</b><small>Your AFGlion dashboard is ready.</small></span></div><div><ShieldCheck/><span><b>Security</b><small>Your account activity and controls are available from the dashboard.</small></span></div></section></Modal>;
   if(type==="profile")return <Modal close={close}><div className="sheet-head"><div><small>ACCOUNT</small><h3>My Profile</h3></div><button onClick={close}><X/></button></div><section className="profile-card"><span className="profile-avatar"><UserRound/></span><h3>{name}</h3><p>{username?"@"+username:"No username"}</p><div><span>Telegram ID</span><b>{tgId||"Browser preview"}</b></div><div><span>Currency</span><b>{state.settings.currency}</b></div></section></Modal>;
-  return <MoneyForm type={type} close={close} state={state} setState={setState} notify={notify} methods={type==="deposit"?depositMethods:withdrawMethods} name={name} username={username} tgId={tgId}/>;
+  return <MoneyForm type={type} close={close} state={state} notify={notify} methods={type==="deposit"?depositMethods:withdrawMethods} tgId={tgId} refresh={refresh}/>;
 }
 
-function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}:any){
+function MoneyForm({type,close,state,notify,methods,tgId,refresh}:any){
   const [amount,setAmount]=useState("");
   const [method,setMethod]=useState(methods[0]?.id||"");
   const [reference,setReference]=useState("");
+  const [proofFile,setProofFile]=useState<File|null>(null);
   const [proofDataUrl,setProofDataUrl]=useState("");
   const [proofName,setProofName]=useState("");
+  const [busy,setBusy]=useState(false);
   const selected=methods.find((x:PaymentMethod)=>x.id===method);
   const deposit=type==="deposit";
-  function submit(e:React.FormEvent){
+
+  async function submit(e:React.FormEvent){
     e.preventDefault();
+    if(!tgId){notify("Open AFGlion from Telegram to use wallet actions.");return}
     const value=Number(amount);
     const min=deposit?state.settings.minDeposit:state.settings.minWithdraw;
     const max=deposit?state.settings.maxDeposit:state.settings.maxWithdraw;
     if(!value||value<min||value>max){notify("Amount must be between "+money(min)+" and "+money(max));return}
     if(!selected){notify("Choose a payment method");return}
     if(!reference.trim()){notify(deposit?"Enter payment reference":"Enter account / wallet details");return}
-    if(deposit&&!proofDataUrl){notify("Payment proof image is required");return}
+    if(deposit&&!proofFile){notify("Payment proof image is required");return}
     if(!deposit&&state.balance<value){notify("Insufficient balance");return}
-    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0),proofDataUrl:deposit?proofDataUrl:undefined,proofName:deposit?proofName:undefined};
-    setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,users:s.users.map(u=>u.telegramId===Number(tgId||0)?{...u,balance:deposit?u.balance:Math.max(0,u.balance-value)}:u),requests:[req,...s.requests]}));
-    notify((deposit?"Deposit":"Withdrawal")+" request created");
-    close();
+    try{
+      setBusy(true);
+      if(deposit){
+        const proofUrl=await uploadProof(Number(tgId),proofFile!);
+        await createDepositBackend({amount:value,method:selected.name,proofUrl,txid:reference.trim()});
+      }else{
+        await createWithdrawalBackend({amount:value,method:selected.name,destination:reference.trim()});
+      }
+      await refresh();
+      notify((deposit?"Deposit":"Withdrawal")+" request submitted");
+      close();
+    }catch(e:any){notify(e?.message||"Request failed")}
+    finally{setBusy(false)}
   }
+
+  function chooseProof(file?:File){
+    if(!file)return;
+    if(!file.type.startsWith("image/")){notify("Please choose an image");return}
+    if(file.size>5*1024*1024){notify("Proof image must be under 5 MB");return}
+    setProofFile(file);setProofName(file.name);
+    const reader=new FileReader();
+    reader.onload=()=>setProofDataUrl(String(reader.result||""));
+    reader.readAsDataURL(file);
+  }
+
   return <Modal close={close}><form className="money-form" onSubmit={submit}>
     <div className="sheet-head"><div><small>{deposit?"FUND WALLET":"REQUEST PAYOUT"}</small><h3>{deposit?"New Deposit":"New Withdrawal"}</h3></div><button type="button" onClick={close}><X/></button></div>
     <section className="amount-box"><span>Amount ({state.settings.currency})</span><div><b>{state.settings.currencySymbol}</b><input autoFocus inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></div><small>Min {money(deposit?state.settings.minDeposit:state.settings.minWithdraw)} • Max {money(deposit?state.settings.maxDeposit:state.settings.maxWithdraw)}</small></section>
-    <label>Payment Method</label><div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
+    <label>Payment Method</label>
+    <div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
     {selected&&<><section className="payment-number-card"><small>{selected.name} ACCOUNT / NUMBER</small><div><b>{selected.number||"Not configured"}</b><button type="button" disabled={!selected.number} onClick={()=>{if(selected.number){navigator.clipboard?.writeText(selected.number);notify("Payment number copied")}}}><Copy/> Copy</button></div></section><section className="method-info"><ShieldCheck/><span>{selected.details||"Follow the payment instructions shown above."}</span></section></>}
-    <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
-    {deposit&&<label className="proof-upload"><input type="file" accept="image/*" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith("image/")){notify("Please choose an image");return}if(file.size>1500000){notify("Proof image must be under 1.5 MB");return}const reader=new FileReader();reader.onload=()=>{setProofDataUrl(String(reader.result||""));setProofName(file.name)};reader.readAsDataURL(file)}}/><span className="proof-upload-icon">{proofDataUrl?<Check/>:<Plus/>}</span><div><b>{proofDataUrl?"Proof attached":"Upload payment proof *"}</b><span>{proofName||"JPG, PNG or WEBP • max 1.5 MB"}</span></div>{proofDataUrl&&<img src={proofDataUrl} alt="Proof preview"/>}</label>}
-    <button className="gold-button" type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} Submit {deposit?"Deposit":"Withdrawal"}</button>
+    <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label>
+    <input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
+    {deposit&&<label className="proof-upload"><input type="file" accept="image/*" onChange={e=>chooseProof(e.target.files?.[0])}/><span className="proof-upload-icon">{proofDataUrl?<Check/>:<Plus/>}</span><div><b>{proofDataUrl?"Proof attached":"Upload payment proof *"}</b><span>{proofName||"JPG, PNG or WEBP • max 5 MB"}</span></div>{proofDataUrl&&<img src={proofDataUrl} alt="Proof preview"/>}</label>}
+    <button className="gold-button" disabled={busy} type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} {busy?"Submitting...":"Submit "+(deposit?"Deposit":"Withdrawal")}</button>
   </form></Modal>
 }
 
