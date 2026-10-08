@@ -31,6 +31,11 @@ function requireAuth(req){
   if(!req.auth || !id) throw new HttpsError("unauthenticated","Sign in through Telegram first");
   return id;
 }
+function requireAdmin(req){
+  const id=requireAuth(req);
+  if(req.auth?.token?.admin!==true && id!==ADMIN_TELEGRAM_ID) throw new HttpsError("permission-denied","Admin access required");
+  return id;
+}
 async function settings(){
   const s=await db.doc("publicConfig/app").get();
   return s.exists?s.data():{};
@@ -137,4 +142,74 @@ exports.claimVip = onCall(async req=>{
     return r;
   });
   return {reward};
+});
+
+
+exports.adminSaveSettings = onCall(async req=>{
+  requireAdmin(req);
+  const d=req.data||{};
+  const methods=x=>Array.isArray(x)?x.slice(0,20).map((m,i)=>({id:String(m.id||("method-"+i)),name:String(m.name||"").slice(0,60),details:String(m.details||"").slice(0,500),active:m.active!==false})).filter(m=>m.name):[];
+  const channels=Array.isArray(d.channels)?d.channels.slice(0,2).map(x=>({name:String(x.name||"").slice(0,80),url:String(x.url||"").slice(0,300)})).filter(x=>x.name&&x.url):[];
+  const payload={
+    currency:String(d.currency||"AFN").slice(0,10),
+    currencySymbol:String(d.currencySymbol||"؋").slice(0,5),
+    minDeposit:Math.max(0,Number(d.minDeposit||0)),
+    maxDeposit:Math.max(0,Number(d.maxDeposit||0)),
+    minWithdraw:Math.max(0,Number(d.minWithdraw||0)),
+    maxWithdraw:Math.max(0,Number(d.maxWithdraw||0)),
+    referralPercent:Math.max(0,Math.min(100,Number(d.referralPercent||0))),
+    announcement:String(d.announcement||"").slice(0,500),
+    depositMethods:methods(d.depositMethods),
+    withdrawMethods:methods(d.withdrawMethods),
+    channels,
+    botUsername:"Afglionbot",
+    updatedAt:Date.now()
+  };
+  if(payload.maxDeposit && payload.minDeposit>payload.maxDeposit) throw new HttpsError("invalid-argument","Deposit minimum cannot exceed maximum");
+  if(payload.maxWithdraw && payload.minWithdraw>payload.maxWithdraw) throw new HttpsError("invalid-argument","Withdrawal minimum cannot exceed maximum");
+  await db.doc("publicConfig/app").set(payload,{merge:true});
+  return {ok:true};
+});
+
+exports.adminCreatePlan = onCall(async req=>{
+  const adminId=requireAdmin(req),d=req.data||{};
+  const name=String(d.name||"").trim(),price=money(d.price),dailyReward=money(d.dailyReward),durationDays=Math.floor(Number(d.durationDays||0));
+  if(!name||price<=0||dailyReward<0||durationDays<=0) throw new HttpsError("invalid-argument","Complete all package fields");
+  const r=await db.collection("vipPlans").add({name,price,dailyReward,durationDays,badge:String(d.badge||"VIP").slice(0,30),active:true,createdBy:adminId,createdAt:Date.now()});
+  return {id:r.id};
+});
+
+exports.adminTogglePlan = onCall(async req=>{
+  requireAdmin(req);
+  const id=String(req.data?.id||""); if(!id) throw new HttpsError("invalid-argument","Plan missing");
+  await db.doc("vipPlans/"+id).update({active:req.data?.active===true});
+  return {ok:true};
+});
+
+exports.adminReviewDeposit = onCall(async req=>{
+  const adminId=requireAdmin(req),id=String(req.data?.id||""),approve=req.data?.approve===true;
+  const r=db.doc("deposits/"+id);
+  await db.runTransaction(async tx=>{
+    const s=await tx.get(r); if(!s.exists||s.data().status!=="pending") throw new HttpsError("failed-precondition","Request already processed");
+    const d=s.data(),u=db.doc("users/"+d.userTelegramId),us=await tx.get(u); if(!us.exists) throw new HttpsError("not-found","User missing");
+    if(approve){
+      tx.update(u,{balance:money(Number(us.data().balance||0)+Number(d.amount||0))});
+      tx.set(db.collection("transactions").doc(),{userTelegramId:d.userTelegramId,type:"deposit",amount:Number(d.amount),status:"completed",referenceId:id,createdAt:Date.now()});
+    }
+    tx.update(r,{status:approve?"approved":"rejected",reviewedBy:adminId,reviewedAt:Date.now()});
+  });
+  return {ok:true};
+});
+
+exports.adminReviewWithdrawal = onCall(async req=>{
+  const adminId=requireAdmin(req),id=String(req.data?.id||""),approve=req.data?.approve===true;
+  const r=db.doc("withdrawals/"+id);
+  await db.runTransaction(async tx=>{
+    const s=await tx.get(r); if(!s.exists||s.data().status!=="pending") throw new HttpsError("failed-precondition","Request already processed");
+    const d=s.data(),u=db.doc("users/"+d.userTelegramId),us=await tx.get(u); if(!us.exists) throw new HttpsError("not-found","User missing");
+    if(!approve) tx.update(u,{balance:money(Number(us.data().balance||0)+Number(d.amount||0))});
+    tx.update(r,{status:approve?"approved":"rejected",reviewedBy:adminId,reviewedAt:Date.now()});
+    tx.set(db.collection("transactions").doc(),{userTelegramId:d.userTelegramId,type:"withdrawal",amount:approve?-Number(d.amount):Number(d.amount),status:approve?"completed":"refunded",referenceId:id,createdAt:Date.now()});
+  });
+  return {ok:true};
 });
