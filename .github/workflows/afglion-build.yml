@@ -1,7 +1,7 @@
 name: AFGlion Build Check
 on:
   push:
-    branches: [main]
+    branches: [afglion-details-final]
   workflow_dispatch:
 jobs:
   build:
