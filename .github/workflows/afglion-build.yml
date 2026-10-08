@@ -1,7 +1,7 @@
 name: AFGlion Build Check
 on:
   push:
-    branches: [main]
+    branches: [afglion-backend-final]
   workflow_dispatch:
 jobs:
   build:
@@ -12,4 +12,5 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - run: node --check functions/index.js
       - run: npm run build
