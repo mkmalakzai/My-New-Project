@@ -5,9 +5,14 @@ export type TelegramMiniAppUser = {
   photo_url?: string;
 };
 
-export function getTelegramWebApp() {
+type TelegramWebApp = {
+  initData?: string;
+  initDataUnsafe?: { user?: TelegramMiniAppUser };
+};
+
+export function getTelegramWebApp(): TelegramWebApp | null {
   if (typeof window === "undefined") return null;
-  return window.Telegram?.WebApp ?? null;
+  return (window as any).Telegram?.WebApp ?? null;
 }
 
 export function getTelegramUser(): TelegramMiniAppUser | null {
