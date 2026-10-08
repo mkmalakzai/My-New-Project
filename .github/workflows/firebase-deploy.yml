@@ -35,33 +35,25 @@ jobs:
           if [ -n "$FIREBASE_SA_PRIMARY" ]; then
             printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
             echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
-            echo "FB_AUTH_MODE=adc" >> "$GITHUB_ENV"
           elif [ -n "$FIREBASE_SA_FALLBACK" ]; then
             printf '%s' "$FIREBASE_SA_FALLBACK" > "$RUNNER_TEMP/firebase-sa.json"
             echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
-            echo "FB_AUTH_MODE=adc" >> "$GITHUB_ENV"
           elif [ -n "$FIREBASE_TOKEN_SECRET" ]; then
             echo "FIREBASE_TOKEN=$FIREBASE_TOKEN_SECRET" >> "$GITHUB_ENV"
-            echo "FB_AUTH_MODE=token" >> "$GITHUB_ENV"
           else
-            echo "::error::Missing Firebase deployment credential. Add FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 (recommended) or FIREBASE_TOKEN as a GitHub Actions secret."
+            echo "::error::Missing Firebase deployment credential."
             exit 1
           fi
 
-      - name: Ensure Telegram bot secret
+      - name: Configure Telegram server environment
         shell: bash
         run: |
           set -e
-          if firebase functions:secrets:get TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "TELEGRAM_BOT_TOKEN already exists in Firebase Secret Manager."
-          elif [ -n "$TELEGRAM_BOT_TOKEN_SECRET" ]; then
-            printf '%s' "$TELEGRAM_BOT_TOKEN_SECRET" > "$RUNNER_TEMP/telegram-bot-token.txt"
-            firebase functions:secrets:set TELEGRAM_BOT_TOKEN --data-file "$RUNNER_TEMP/telegram-bot-token.txt" --project "$PROJECT_ID"
-            rm -f "$RUNNER_TEMP/telegram-bot-token.txt"
-          else
-            echo "::error::TELEGRAM_BOT_TOKEN is missing in Firebase Secret Manager and GitHub Actions secrets."
+          if [ -z "$TELEGRAM_BOT_TOKEN_SECRET" ]; then
+            echo "::error::Missing TELEGRAM_BOT_TOKEN GitHub secret."
             exit 1
           fi
+          printf 'TELEGRAM_BOT_TOKEN=%s\n' "$TELEGRAM_BOT_TOKEN_SECRET" > functions/.env
 
       - name: Install function dependencies
         working-directory: functions
@@ -69,3 +61,7 @@ jobs:
 
       - name: Deploy backend, Firestore rules and Storage rules
         run: firebase deploy --only functions,firestore:rules,storage --project "$PROJECT_ID" --non-interactive
+
+      - name: Remove temporary function environment
+        if: always()
+        run: rm -f functions/.env
