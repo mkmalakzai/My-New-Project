@@ -1,0 +1,71 @@
+name: AFGlion Firebase Deploy
+on:
+  push:
+    branches: [afglion-backend-final]
+    paths:
+      - "functions/**"
+      - "firestore.rules"
+      - "storage.rules"
+      - "firebase.json"
+      - ".github/workflows/firebase-deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: afglion-47b07
+      FIREBASE_SA_PRIMARY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 }}
+      FIREBASE_SA_FALLBACK: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      FIREBASE_TOKEN_SECRET: ${{ secrets.FIREBASE_TOKEN }}
+      TELEGRAM_BOT_TOKEN_SECRET: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Configure Firebase authentication
+        shell: bash
+        run: |
+          set -e
+          if [ -n "$FIREBASE_SA_PRIMARY" ]; then
+            printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+            echo "FB_AUTH_MODE=adc" >> "$GITHUB_ENV"
+          elif [ -n "$FIREBASE_SA_FALLBACK" ]; then
+            printf '%s' "$FIREBASE_SA_FALLBACK" > "$RUNNER_TEMP/firebase-sa.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+            echo "FB_AUTH_MODE=adc" >> "$GITHUB_ENV"
+          elif [ -n "$FIREBASE_TOKEN_SECRET" ]; then
+            echo "FIREBASE_TOKEN=$FIREBASE_TOKEN_SECRET" >> "$GITHUB_ENV"
+            echo "FB_AUTH_MODE=token" >> "$GITHUB_ENV"
+          else
+            echo "::error::Missing Firebase deployment credential. Add FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 (recommended) or FIREBASE_TOKEN as a GitHub Actions secret."
+            exit 1
+          fi
+
+      - name: Ensure Telegram bot secret
+        shell: bash
+        run: |
+          set -e
+          if firebase functions:secrets:get TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "TELEGRAM_BOT_TOKEN already exists in Firebase Secret Manager."
+          elif [ -n "$TELEGRAM_BOT_TOKEN_SECRET" ]; then
+            printf '%s' "$TELEGRAM_BOT_TOKEN_SECRET" > "$RUNNER_TEMP/telegram-bot-token.txt"
+            firebase functions:secrets:set TELEGRAM_BOT_TOKEN --data-file "$RUNNER_TEMP/telegram-bot-token.txt" --project "$PROJECT_ID"
+            rm -f "$RUNNER_TEMP/telegram-bot-token.txt"
+          else
+            echo "::error::TELEGRAM_BOT_TOKEN is missing in Firebase Secret Manager and GitHub Actions secrets."
+            exit 1
+          fi
+
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm install
+
+      - name: Deploy backend, Firestore rules and Storage rules
+        run: firebase deploy --only functions,firestore:rules,storage --project "$PROJECT_ID" --non-interactive
