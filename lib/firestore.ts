@@ -37,7 +37,7 @@ export async function getUser(id:number){const s=await getDoc(doc(db,"users",Str
 export async function getActiveVipPlans(){const s=await getDocs(query(collection(db,"vipPlans"),where("active","==",true)));return s.docs.map(d=>({id:d.id,...d.data()} as VipPlanDoc));}
 export async function getAllVipPlans(){const s=await getDocs(collection(db,"vipPlans"));return s.docs.map(d=>({id:d.id,...d.data()} as VipPlanDoc));}
 export async function getPublicSettings(){const s=await getDoc(doc(db,"publicConfig","app"));return s.exists()?s.data():null;}
-export async function savePublicSettings(settings:any){return setDoc(doc(db,"publicConfig","app"),settings,{merge:true});}
+export async function savePublicSettings(settings:any){const call=httpsCallable(functions,"adminSaveSettings");const res:any=await call(settings);return res.data;}
 export async function uploadDepositProof(userId:number,file:File){const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");const r=storageRef(storage,`deposit-proofs/${userId}/${Date.now()}-${safe}`);await uploadBytes(r,file,{contentType:file.type});return getDownloadURL(r);}
 export async function getTransactions(id:number){const s=await getDocs(query(collection(db,"transactions"),where("userTelegramId","==",id),limit(50)));return s.docs.map(d=>({id:d.id,...d.data()} as TransactionDoc)).sort((a,b)=>b.createdAt-a.createdAt);}
 export async function getMyVip(id:number){const s=await getDocs(query(collection(db,"vipPurchases"),where("userTelegramId","==",id)));return s.docs.map(d=>({id:d.id,...d.data()} as VipPurchaseDoc)).sort((a,b)=>b.startAt-a.startAt);}
@@ -65,26 +65,17 @@ export async function claimVip(userId:number,purchaseId:string){
   return Number(res.data?.reward||0);
 }
 
-export async function adminCreatePlan(adminId:number,p:Omit<VipPlanDoc,"id"|"createdAt">){return addDoc(collection(db,"vipPlans"),{...p,createdBy:adminId,createdAt:Date.now()});}
-export async function adminTogglePlan(id:string,active:boolean){return updateDoc(doc(db,"vipPlans",id),{active});}
+export async function adminCreatePlan(adminId:number,p:Omit<VipPlanDoc,"id"|"createdAt">){
+  const call=httpsCallable(functions,"adminCreatePlan");const res:any=await call(p);return res.data;
+}
+export async function adminTogglePlan(id:string,active:boolean){
+  const call=httpsCallable(functions,"adminTogglePlan");const res:any=await call({id,active});return res.data;
+}
 export async function adminList(collectionName:string){const s=await getDocs(query(collection(db,collectionName),orderBy("createdAt","desc"),limit(100)));return s.docs.map(d=>({id:d.id,...d.data()}));}
 
 export async function adminApproveDeposit(adminId:number,id:string,approve:boolean){
-  const r=doc(db,"deposits",id), tr=doc(collection(db,"transactions"));
-  await runTransaction(db,async tx=>{
-    const s=await tx.get(r); if(!s.exists()||s.data().status!=="pending") throw new Error("Already processed");
-    const d=s.data(); const u=doc(db,"users",String(d.userTelegramId)); const us=await tx.get(u); if(!us.exists()) throw new Error("User missing");
-    if(approve){tx.update(u,{balance:money(Number(us.data().balance||0)+Number(d.amount||0))});tx.set(tr,{userTelegramId:d.userTelegramId,type:"deposit",amount:Number(d.amount),status:"completed",referenceId:id,createdAt:Date.now()});}
-    tx.update(r,{status:approve?"approved":"rejected",reviewedBy:adminId,reviewedAt:Date.now()});
-  });
+  const call=httpsCallable(functions,"adminReviewDeposit");const res:any=await call({id,approve});return res.data;
 }
 export async function adminApproveWithdrawal(adminId:number,id:string,approve:boolean){
-  const r=doc(db,"withdrawals",id), tr=doc(collection(db,"transactions"));
-  await runTransaction(db,async tx=>{
-    const s=await tx.get(r); if(!s.exists()||s.data().status!=="pending") throw new Error("Already processed");
-    const d=s.data(); const u=doc(db,"users",String(d.userTelegramId)); const us=await tx.get(u); if(!us.exists()) throw new Error("User missing");
-    if(!approve) tx.update(u,{balance:money(Number(us.data().balance||0)+Number(d.amount||0))});
-    tx.update(r,{status:approve?"approved":"rejected",reviewedBy:adminId,reviewedAt:Date.now()});
-    tx.set(tr,{userTelegramId:d.userTelegramId,type:"withdrawal",amount:approve?-Number(d.amount):Number(d.amount),status:approve?"completed":"refunded",referenceId:id,createdAt:Date.now()});
-  });
+  const call=httpsCallable(functions,"adminReviewWithdrawal");const res:any=await call({id,approve});return res.data;
 }
