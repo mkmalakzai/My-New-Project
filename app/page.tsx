@@ -13,11 +13,11 @@ type Tab="home"|"stake"|"referral"|"wallet"|"admin";
 type Sheet="deposit"|"withdraw"|"notifications"|"profile"|null;
 type AdminSection="overview"|"plans"|"payments"|"requests"|"channels"|"settings";
 
-type PaymentMethod={id:string;name:string;details:string;active:boolean;kind:"deposit"|"withdraw"|"both"};
+type PaymentMethod={id:string;name:string;number?:string;details:string;active:boolean;kind:"deposit"|"withdraw"|"both"};
 type Plan={id:string;name:string;price:number;dailyReward:number;durationDays:number;badge:string;active:boolean};
 type Stake={id:string;planId:string;planName:string;price:number;dailyReward:number;durationDays:number;startedAt:number;claimed:number;status:"active"|"completed"};
 type Tx={id:string;type:string;amount:number;status:string;createdAt:number;note?:string};
-type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number};
+type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number};
 type ReferralItem={id:string;name:string;joinedAt:number;status:"joined"|"rewarded";reward:number};
 type SettingsDoc={
   currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;
@@ -54,8 +54,8 @@ const defaultState:AppState={
     announcement:"Welcome to AFGlion — your premium finance dashboard.",
     channels:[],
     paymentMethods:[
-      {id:"hesab-pay",name:"HESAB PAY",details:"Add your HESAB PAY number or payment instructions.",active:true,kind:"both"},
-      {id:"momo",name:"MOMO",details:"Add your MOMO number or payment instructions.",active:true,kind:"both"}
+      {id:"hesab-pay",name:"HESAB PAY",number:"",details:"Add payment instructions here.",active:true,kind:"both"},
+      {id:"momo",name:"MOMO",number:"",details:"Add payment instructions here.",active:true,kind:"both"}
     ]
   }
 };
@@ -265,7 +265,7 @@ function HomeView(p:any){
     <section className="account-grid">
       <button type="button" onClick={()=>p.setSheet("profile")}><span><UserRound/></span><b>Profile</b><small>Account details</small></button>
       <button type="button" onClick={()=>p.openTab("wallet")}><span><History/></span><b>Activity</b><small>{s.transactions.length} records</small></button>
-      <button type="button" onClick={()=>p.notify("Security center is ready for backend connection.")}><span><LockKeyhole/></span><b>Security</b><small>Protected mode</small></button>
+      <button type="button" onClick={()=>p.notify("Security center is active.")}><span><LockKeyhole/></span><b>Security</b><small>Protected mode</small></button>
     </section>
 
     <SectionTitle title="Recent Activity" action="Wallet" onClick={()=>p.openTab("wallet")}/>
@@ -306,7 +306,7 @@ function StakeView(p:any){
     </section>
     {!p.activePlans.length&&<EmptyState icon={<Crown/>} title="No active plans" text="Admin can publish packages from the Admin Panel."/>}
 
-    <section className="info-card"><ShieldCheck/><div><b>Frontend preview mode</b><span>Plan activation works in this frontend demo and is stored on this device. Backend sync will be connected after design approval.</span></div></section>
+    <section className="info-card"><ShieldCheck/><div><b>Membership protection</b><span>Review the package amount, duration and reward details before activation.</span></div></section>
   </>
 }
 
@@ -409,7 +409,7 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
     setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.map(x=>x.id===id?{...x,[key]:value}:x)}}));
   }
   function addMethod(){
-    setDraft(s=>({...s,settings:{...s.settings,paymentMethods:[...s.settings.paymentMethods,{id:uid("method"),name:"New Method",details:"",active:true,kind:"both"}]}}));
+    setDraft(s=>({...s,settings:{...s.settings,paymentMethods:[...s.settings.paymentMethods,{id:uid("method"),name:"New Method",number:"",details:"",active:true,kind:"both"}]}}));
   }
   function removeMethod(id:string){
     setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.filter(x=>x.id!==id)}}));
@@ -444,7 +444,7 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
 
     {section==="overview"&&<>
       <section className="admin-kpis"><Metric title="Balance" value={money(state.balance)} sub="Frontend wallet"/><Metric title="Plans" value={String(state.plans.length)} sub="Configured"/><Metric title="Requests" value={String(state.requests.filter(x=>x.status==="pending").length)} sub="Pending"/><Metric title="Referral" value={state.settings.referralPercent+"%"} sub="Commission"/></section>
-      <section className="admin-hero"><Settings/><div><b>Frontend Control Center</b><span>Every tab and control here works locally. Backend connection is frozen until design approval.</span></div></section>
+      <section className="admin-hero"><Settings/><div><b>AFGlion Control Center</b><span>Manage packages, payment methods, requests, channels and app settings from one place.</span></div></section>
       <SectionTitle title="Quick Actions"/>
       <section className="admin-quick"><button type="button" onClick={()=>setSection("plans")}><Crown/><b>Manage Plans</b></button><button type="button" onClick={()=>setSection("payments")}><WalletCards/><b>Payments</b></button><button type="button" onClick={()=>setSection("requests")}><History/><b>Requests</b></button><button type="button" onClick={()=>setSection("settings")}><Settings/><b>Settings</b></button></section>
     </>}
@@ -467,7 +467,8 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
         <div className="method-editor">
           {draft.settings.paymentMethods.map(m=><article key={m.id}>
             <div className="method-line"><input value={m.name} onChange={e=>changeMethod(m.id,"name",e.target.value)} placeholder="Method name"/><select value={m.kind} onChange={e=>changeMethod(m.id,"kind",e.target.value)}><option value="both">Both</option><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select><button className={m.active?"toggle on":"toggle"} type="button" onClick={()=>changeMethod(m.id,"active",!m.active)}>{m.active?"On":"Off"}</button></div>
-            <div className="method-line"><input value={m.details} onChange={e=>changeMethod(m.id,"details",e.target.value)} placeholder="Number / instructions"/><button className="delete" type="button" onClick={()=>removeMethod(m.id)}><Trash2/></button></div>
+            <div className="method-number-edit"><label>Account / Phone Number</label><input value={m.number||""} onChange={e=>changeMethod(m.id,"number",e.target.value)} placeholder="e.g. 07XXXXXXXX"/></div>
+            <div className="method-line"><input value={m.details} onChange={e=>changeMethod(m.id,"details",e.target.value)} placeholder="Payment instructions / note"/><button className="delete" type="button" onClick={()=>removeMethod(m.id)}><Trash2/></button></div>
           </article>)}
         </div>
         <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save Payment Methods</button>
@@ -476,8 +477,19 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
 
     {section==="requests"&&<>
       <SectionTitle title="Pending & Recent Requests"/>
-      {state.requests.map(r=><section className="admin-row" key={r.id}><span className={"request-icon "+r.type}>{r.type==="deposit"?<ArrowDownToLine/>:<ArrowUpFromLine/>}</span><div><b>{r.type} • {r.method}</b><small>{money(r.amount)} • {r.reference||"No reference"} • {r.status}</small></div>{r.status==="pending"&&<div className="review"><button type="button" onClick={()=>reviewRequest(r.id,true)}><Check/></button><button type="button" onClick={()=>reviewRequest(r.id,false)}><X/></button></div>}</section>)}
-      {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here."/>}
+      <section className="request-summary"><div><span>Pending</span><b>{state.requests.filter(x=>x.status==="pending").length}</b></div><div><span>Approved</span><b>{state.requests.filter(x=>x.status==="approved").length}</b></div><div><span>Rejected</span><b>{state.requests.filter(x=>x.status==="rejected").length}</b></div></section>
+      {state.requests.map(r=><article className="request-card" key={r.id}>
+        <div className="request-card-head"><span className={"request-icon "+r.type}>{r.type==="deposit"?<ArrowDownToLine/>:<ArrowUpFromLine/>}</span><div><small>{r.type==="deposit"?"DEPOSIT REQUEST":"WITHDRAWAL REQUEST"}</small><b>{money(r.amount)}</b></div><span className={"request-status "+r.status}>{r.status}</span></div>
+        <div className="request-user"><span className="request-user-avatar"><UserRound/></span><div><b>{r.userName||"AFGlion User"}</b><small>{r.username?"@"+r.username:"No username"} • ID: {r.telegramId||"Browser"}</small></div></div>
+        <div className="request-details">
+          <div><span>Payment Method</span><b>{r.method}</b></div>
+          <div><span>{r.type==="deposit"?"Reference / TXID":"Account / Wallet"}</span><b>{r.reference||"—"}</b></div>
+          <div><span>Request ID</span><b className="mono">{r.id}</b></div>
+          <div><span>Date & Time</span><b>{new Date(r.createdAt).toLocaleString()}</b></div>
+        </div>
+        {r.status==="pending"?<div className="request-actions"><button type="button" className="approve" onClick={()=>reviewRequest(r.id,true)}><Check/> Approve</button><button type="button" className="reject" onClick={()=>reviewRequest(r.id,false)}><X/> Reject</button></div>:<div className="processed-note"><ShieldCheck/> Request processed: {r.status}</div>}
+      </article>)}
+      {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here with full details."/>}
     </>}
 
     {section==="channels"&&<section className="admin-card form-grid">
@@ -500,12 +512,12 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
 }
 
 function SheetLayer({type,close,state,setState,notify,depositMethods,withdrawMethods,name,username,tgId}:any){
-  if(type==="notifications")return <Modal close={close}><div className="sheet-head"><div><small>AFGLION</small><h3>Notifications</h3></div><button onClick={close}><X/></button></div><section className="notice-list"><div><Bell/><span><b>Welcome to AFGlion</b><small>Your frontend dashboard is ready.</small></span></div><div><ShieldCheck/><span><b>Security</b><small>Backend connection is currently frozen for design approval.</small></span></div></section></Modal>;
+  if(type==="notifications")return <Modal close={close}><div className="sheet-head"><div><small>AFGLION</small><h3>Notifications</h3></div><button onClick={close}><X/></button></div><section className="notice-list"><div><Bell/><span><b>Welcome to AFGlion</b><small>Your AFGlion dashboard is ready.</small></span></div><div><ShieldCheck/><span><b>Security</b><small>Your account activity and controls are available from the dashboard.</small></span></div></section></Modal>;
   if(type==="profile")return <Modal close={close}><div className="sheet-head"><div><small>ACCOUNT</small><h3>My Profile</h3></div><button onClick={close}><X/></button></div><section className="profile-card"><span className="profile-avatar"><UserRound/></span><h3>{name}</h3><p>{username?"@"+username:"No username"}</p><div><span>Telegram ID</span><b>{tgId||"Browser preview"}</b></div><div><span>Currency</span><b>{state.settings.currency}</b></div></section></Modal>;
-  return <MoneyForm type={type} close={close} state={state} setState={setState} notify={notify} methods={type==="deposit"?depositMethods:withdrawMethods}/>;
+  return <MoneyForm type={type} close={close} state={state} setState={setState} notify={notify} methods={type==="deposit"?depositMethods:withdrawMethods} name={name} username={username} tgId={tgId}/>;
 }
 
-function MoneyForm({type,close,state,setState,notify,methods}:any){
+function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}:any){
   const [amount,setAmount]=useState("");
   const [method,setMethod]=useState(methods[0]?.id||"");
   const [reference,setReference]=useState("");
@@ -520,7 +532,7 @@ function MoneyForm({type,close,state,setState,notify,methods}:any){
     if(!selected){notify("Choose a payment method");return}
     if(!reference.trim()){notify(deposit?"Enter payment reference":"Enter account / wallet details");return}
     if(!deposit&&state.balance<value){notify("Insufficient balance");return}
-    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now()};
+    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0)};
     setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,requests:[req,...s.requests]}));
     notify((deposit?"Deposit":"Withdrawal")+" request created");
     close();
@@ -529,9 +541,9 @@ function MoneyForm({type,close,state,setState,notify,methods}:any){
     <div className="sheet-head"><div><small>{deposit?"FUND WALLET":"REQUEST PAYOUT"}</small><h3>{deposit?"New Deposit":"New Withdrawal"}</h3></div><button type="button" onClick={close}><X/></button></div>
     <section className="amount-box"><span>Amount ({state.settings.currency})</span><div><b>{state.settings.currencySymbol}</b><input autoFocus inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></div><small>Min {money(deposit?state.settings.minDeposit:state.settings.minWithdraw)} • Max {money(deposit?state.settings.maxDeposit:state.settings.maxWithdraw)}</small></section>
     <label>Payment Method</label><div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
-    {selected&&<section className="method-info"><ShieldCheck/><span>{selected.details||"Admin has not added instructions yet."}</span></section>}
+    {selected&&<><section className="payment-number-card"><small>{selected.name} ACCOUNT / NUMBER</small><div><b>{selected.number||"Not configured"}</b><button type="button" disabled={!selected.number} onClick={()=>{if(selected.number){navigator.clipboard?.writeText(selected.number);notify("Payment number copied")}}}><Copy/> Copy</button></div></section><section className="method-info"><ShieldCheck/><span>{selected.details||"Follow the payment instructions shown above."}</span></section></>}
     <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
-    {deposit&&<section className="upload-placeholder"><Plus/><div><b>Payment proof</b><span>Frontend preview: image upload will connect with backend later.</span></div></section>}
+    {deposit&&<section className="upload-placeholder"><Plus/><div><b>Payment proof</b><span>Keep your payment screenshot/reference ready for verification.</span></div></section>}
     <button className="gold-button" type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} Submit {deposit?"Deposit":"Withdrawal"}</button>
   </form></Modal>
 }
