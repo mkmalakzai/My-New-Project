@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useState} from "react";
 import {AnimatePresence,motion} from "framer-motion";
 import {
   ArrowDownToLine,ArrowUpFromLine,BadgePercent,Bell,Check,ChevronRight,Copy,
@@ -8,6 +8,14 @@ import {
   Settings,ShieldCheck,Smartphone,Sparkles,Trash2,TrendingUp,UserRound,
   Users,WalletCards,X,Zap
 } from "lucide-react";
+import {authenticateTelegram} from "@/lib/auth";
+import {
+  getPublicState,getBootstrap,uploadProof,createDepositBackend,createWithdrawalBackend,
+  buyPlanBackend,claimPlanBackend,adminSaveSettingsBackend,adminCreatePlanBackend,
+  adminTogglePlanBackend,adminDeletePlanBackend,adminReviewRequestBackend,
+  adminAdjustBalanceBackend,adminSetBanBackend,ownerAddAdminBackend,
+  ownerRemoveAdminBackend,ownerTransferBackend
+} from "@/lib/backend";
 
 type Tab="home"|"stake"|"referral"|"wallet"|"admin";
 type Sheet="deposit"|"withdraw"|"notifications"|"profile"|null;
@@ -17,7 +25,7 @@ type PaymentMethod={id:string;name:string;number?:string;details:string;active:b
 type Plan={id:string;name:string;price:number;dailyReward:number;durationDays:number;badge:string;active:boolean};
 type Stake={id:string;planId:string;planName:string;price:number;dailyReward:number;durationDays:number;startedAt:number;claimed:number;status:"active"|"completed"};
 type Tx={id:string;type:string;amount:number;status:string;createdAt:number;note?:string};
-type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number;proofDataUrl?:string;proofName?:string};
+type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number;proofDataUrl?:string;proofUrl?:string;proofName?:string};
 type ReferralItem={id:string;name:string;joinedAt:number;status:"joined"|"rewarded";reward:number};
 type SettingsDoc={
   currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;
@@ -33,7 +41,6 @@ type AppState={
 };
 
 const OWNER_ID=6589090462;
-const STORE_KEY="afglion_frontend_v4";
 
 const defaultState:AppState={
   balance:0,
@@ -80,48 +87,91 @@ export default function App(){
   const [name,setName]=useState("AFGlion Guest");
   const [username,setUsername]=useState("");
   const [photo,setPhoto]=useState("");
-  const [adminPreview,setAdminPreview]=useState(false);
+  const [viewerRole,setViewerRole]=useState<"guest"|"user"|"admin"|"owner">("guest");
+  const [backendError,setBackendError]=useState("");
   const [confirmPlan,setConfirmPlan]=useState<Plan|null>(null);
 
-  useEffect(()=>{
-    try{
-      const raw=localStorage.getItem(STORE_KEY);
-      if(raw){
-        const parsed=JSON.parse(raw);
-        setState({...cloneDefault(),...parsed,settings:{...cloneDefault().settings,...parsed.settings}});
-      }
-    }catch{}
-    const params=new URLSearchParams(window.location.search);
-    setAdminPreview(params.get("admin")==="true");
+  function mapBootstrap(data:any){
+    setViewerRole((data?.role||"user") as any);
+    setState(prev=>{
+      const user=data?.user||{};
+      const settings={...prev.settings,...(data?.settings||{})};
+      const rawPlans=(data?.allPlans||data?.plans||[]);
+      const plans:Plan[]=rawPlans.map((x:any)=>({
+        id:String(x.id),name:String(x.name||"Plan"),price:Number(x.price||0),
+        dailyReward:Number(x.dailyReward||0),durationDays:Number(x.durationDays||0),
+        badge:String(x.badge||"VIP"),active:x.active!==false
+      }));
+      const stakes:Stake[]=(data?.stakes||[]).map((x:any)=>({
+        id:String(x.id),planId:String(x.planId||""),planName:String(x.planName||"Plan"),
+        price:Number(x.price||0),dailyReward:Number(x.dailyReward||0),durationDays:Number(x.durationDays||0),
+        startedAt:Number(x.startAt||x.startedAt||0),claimed:Number(x.claimedReward||x.claimed||0),
+        status:x.status==="completed"?"completed":"active"
+      }));
+      const transactions:Tx[]=(data?.transactions||[]).map((x:any)=>({
+        id:String(x.id),type:String(x.type||"activity"),amount:Number(x.amount||0),
+        status:String(x.status||"completed"),createdAt:Number(x.createdAt||0),note:String(x.note||"")
+      }));
+      const referrals:ReferralItem[]=(data?.referrals||[]).map((x:any)=>({
+        id:String(x.id),name:String(x.name||"User"),joinedAt:Number(x.joinedAt||x.createdAt||0),
+        status:x.status==="rewarded"?"rewarded":"joined",reward:Number(x.reward||0)
+      }));
+      const requests:RequestItem[]=(data?.requests||[]).map((x:any)=>({
+        id:String(x.id),type:x.type==="withdraw"?"withdraw":"deposit",amount:Number(x.amount||0),
+        method:String(x.method||""),reference:String(x.reference||x.txid||x.destination||""),
+        status:["approved","rejected"].includes(x.status)?x.status:"pending",createdAt:Number(x.createdAt||0),
+        userName:String(x.userName||user.name||name||"AFGlion User"),username:String(x.username||user.username||""),
+        telegramId:Number(x.telegramId||x.userTelegramId||user.telegramId||tgId||0),
+        proofUrl:String(x.proofUrl||""),proofName:String(x.proofName||"Payment proof")
+      }));
+      const users:UserRecord[]=(data?.users||[user]).filter((x:any)=>x&&x.telegramId).map((x:any)=>({
+        telegramId:Number(x.telegramId),name:String(x.name||x.firstName||"User"),username:String(x.username||""),
+        balance:Number(x.balance||0),vipEarnings:Number(x.vipEarnings||x.totalVipProfit||0),
+        referralEarnings:Number(x.referralEarnings||0),joinedAt:Number(x.joinedAt||x.createdAt||0),
+        lastSeen:Number(x.lastSeen||0),banned:x.banned===true||x.isBanned===true
+      }));
+      return {
+        ...prev,
+        balance:Number(user.balance||0),vipEarnings:Number(user.vipEarnings||0),
+        referralEarnings:Number(user.referralEarnings||0),plans,stakes,transactions,referrals,requests,users,
+        security:data?.security?{ownerId:Number(data.security.ownerId||OWNER_ID),adminIds:(data.security.adminIds||[]).map(Number)}:prev.security,
+        settings
+      };
+    });
+  }
+
+  async function refreshBackend(){
+    if(!tgId)return;
+    const data:any=await getBootstrap();
+    mapBootstrap(data);
+  }
+
+  useEffect(()=>{(async()=>{
     const w=(window as any).Telegram?.WebApp;
     const u=w?.initDataUnsafe?.user;
-    if(u?.id){
-      setTgId(Number(u.id));
-      setName(u.first_name||"AFGlion User");
-      setUsername(u.username||"");
-      setPhoto(u.photo_url||"");
-      w?.ready?.(); w?.expand?.();
-      w?.setHeaderColor?.("#080808"); w?.setBackgroundColor?.("#080808");
-    }
-    setReady(true);
-  },[]);
-
-  useEffect(()=>{
-    if(!ready)return;
-    localStorage.setItem(STORE_KEY,JSON.stringify(state));
-  },[state,ready]);
-
-  useEffect(()=>{
-    if(!ready||!tgId)return;
-    setState(s=>{
-      const found=s.users.find(x=>x.telegramId===tgId);
-      if(found){
-        return {...s,users:s.users.map(x=>x.telegramId===tgId?{...x,name,username,lastSeen:now(),balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings}:x)};
+    try{
+      if(u?.id&&w?.initData){
+        const id=Number(u.id);
+        setTgId(id);setName(u.first_name||"AFGlion User");setUsername(u.username||"");setPhoto(u.photo_url||"");
+        w?.ready?.();w?.expand?.();w?.setHeaderColor?.("#080808");w?.setBackgroundColor?.("#080808");
+        const raw=String(w?.initDataUnsafe?.start_param||"");
+        const ref=raw.startsWith("ref_")?Number(raw.slice(4)):null;
+        const auth:any=await authenticateTelegram(w.initData,ref);
+        setViewerRole((auth?.role||"user") as any);
+        const data:any=await getBootstrap();
+        mapBootstrap(data);
+      }else{
+        const pub:any=await getPublicState();
+        setState(s=>({...s,plans:(pub?.plans||s.plans).map((x:any)=>({...x,id:String(x.id)})),settings:{...s.settings,...(pub?.settings||{})}}));
+        setViewerRole("guest");
       }
-      const user:UserRecord={telegramId:tgId,name,username,balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings,joinedAt:now(),lastSeen:now(),banned:false};
-      return {...s,users:[user,...s.users]};
-    });
-  },[ready,tgId,name,username]);
+    }catch(e:any){
+      setBackendError(e?.message||"Unable to connect to AFGlion backend");
+      if(!u?.id){
+        setViewerRole("guest");
+      }
+    }finally{setReady(true)}
+  })()},[]);
 
   useEffect(()=>{
     if(!toast)return;
@@ -129,9 +179,9 @@ export default function App(){
     return()=>clearTimeout(t);
   },[toast]);
 
-  const isAdmin=adminPreview||tgId===state.security.ownerId||state.security.adminIds.includes(tgId);
+  const isAdmin=viewerRole==="admin"||viewerRole==="owner";
   const currentUser=state.users.find(u=>u.telegramId===tgId);
-  const isBanned=!!tgId&&currentUser?.banned===true&&tgId!==state.security.ownerId;
+  const isBanned=!!tgId&&currentUser?.banned===true&&viewerRole!=="owner";
   const activeStake=state.stakes.find(x=>x.status==="active");
   const totalEarned=state.vipEarnings+state.referralEarnings;
   const portfolio=state.balance+totalEarned;
@@ -169,41 +219,29 @@ export default function App(){
     const id=tgId||6589090462;
     return "https://t.me/Afglionbot?startapp=ref_"+id;
   }
-  function activatePlan(plan:Plan){
-    if(state.balance<plan.price){
+  async function activatePlan(plan:Plan){
+    if(!tgId){notify("Open AFGlion from Telegram to activate a package.");return}
+    try{
+      if(state.balance<plan.price){setConfirmPlan(null);notify("Balance is too low — deposit first.");setSheet("deposit");return}
+      await buyPlanBackend(plan.id);
       setConfirmPlan(null);
-      notify("Balance is too low — deposit first.");
-      setSheet("deposit");
-      return;
-    }
-    updateState(s=>({
-      ...s,
-      balance:s.balance-plan.price,
-      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance-plan.price}:u),
-      stakes:[{id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"},...s.stakes],
-      transactions:[{id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name},...s.transactions]
-    }));
-    setConfirmPlan(null);
-    notify(plan.name+" activated");
+      await refreshBackend();
+      notify(plan.name+" activated");
+    }catch(e:any){notify(e?.message||"Activation failed")}
   }
-  function claimDemo(stake:Stake){
-    const elapsed=Math.floor((now()-stake.startedAt)/86400000);
-    const available=Math.max(0,elapsed*stake.dailyReward-stake.claimed);
-    if(available<=0){notify("No reward available yet");return}
-    updateState(s=>({
-      ...s,
-      balance:s.balance+available,
-      vipEarnings:s.vipEarnings+available,
-      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance+available,vipEarnings:s.vipEarnings+available}:u),
-      stakes:s.stakes.map(x=>x.id===stake.id?{...x,claimed:x.claimed+available}:x),
-      transactions:[{id:uid("tx"),type:"vip_reward",amount:available,status:"completed",createdAt:now(),note:stake.planName},...s.transactions]
-    }));
-    notify(money(available)+" claimed");
+  async function claimDemo(stake:Stake){
+    if(!tgId){notify("Open AFGlion from Telegram to claim rewards.");return}
+    try{
+      const res:any=await claimPlanBackend(stake.id);
+      await refreshBackend();
+      notify(money(Number(res?.reward||0))+" claimed");
+    }catch(e:any){notify(e?.message||"Claim failed")}
   }
 
-  const common={state,setState,notify,openTab,setSheet,name,username,photo,tgId,isAdmin,activeStake,activePlans,depositMethods,withdrawMethods,portfolio,totalEarned,referralLink,copy,openTelegram,activatePlan,claimDemo,setConfirmPlan};
+  const common={state,setState,notify,openTab,setSheet,name,username,photo,tgId,isAdmin,activeStake,activePlans,depositMethods,withdrawMethods,portfolio,totalEarned,referralLink,copy,openTelegram,activatePlan,claimDemo,setConfirmPlan,refreshBackend};
 
   if(!ready)return <main className="loading"><motion.div animate={{scale:[1,1.1,1],rotate:[0,4,-4,0]}} transition={{repeat:Infinity,duration:2}} className="loader-lion">🦁</motion.div><span>Opening AFGlion...</span></main>;
+  if(backendError&&tgId)return <main className="loading"><div className="restricted-card"><RefreshCw/><h2>Connection Error</h2><p>{backendError}</p><small>Close and reopen AFGlion from Telegram after backend deployment.</small></div></main>;
   if(isBanned)return <main className="loading"><div className="restricted-card"><LockKeyhole/><h2>Account Restricted</h2><p>Your AFGlion account has been banned by an administrator.</p><small>Telegram ID: {tgId}</small></div></main>;
 
   return <main className="app-shell">
@@ -225,7 +263,7 @@ export default function App(){
         {tab==="stake"&&<StakeView {...common}/>}
         {tab==="referral"&&<ReferralView {...common}/>}
         {tab==="wallet"&&<WalletView {...common}/>}
-        {tab==="admin"&&isAdmin&&<AdminView state={state} setState={setState} section={adminSection} setSection={setAdminSection} notify={notify} onBack={()=>openTab("home")} viewerId={tgId||state.security.ownerId}/>}
+        {tab==="admin"&&isAdmin&&<AdminView state={state} setState={setState} section={adminSection} setSection={setAdminSection} notify={notify} onBack={()=>openTab("home")} viewerId={tgId||state.security.ownerId} refresh={refreshBackend}/>}
         {tab==="admin"&&!isAdmin&&<EmptyState icon={<LockKeyhole/>} title="Admin access only" text="Open AFGlion with the owner Telegram account."/>}
       </motion.section>
     </AnimatePresence>
@@ -238,7 +276,7 @@ export default function App(){
     </nav>}
 
     <AnimatePresence>
-      {sheet&&<SheetLayer type={sheet} close={()=>setSheet(null)} state={state} setState={setState} notify={notify} depositMethods={depositMethods} withdrawMethods={withdrawMethods} name={name} username={username} tgId={tgId}/>}
+      {sheet&&<SheetLayer type={sheet} close={()=>setSheet(null)} state={state} setState={setState} notify={notify} depositMethods={depositMethods} withdrawMethods={withdrawMethods} name={name} username={username} tgId={tgId} refresh={refreshBackend}/>}
       {confirmPlan&&<ConfirmPlan plan={confirmPlan} balance={state.balance} close={()=>setConfirmPlan(null)} confirm={()=>activatePlan(confirmPlan)}/>}
       {toast&&<motion.div className="toast" initial={{opacity:0,y:20,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:12}}><Check/> {toast}</motion.div>}
     </AnimatePresence>
