@@ -449,7 +449,7 @@ function WalletView(p:any){
   </>
 }
 
-function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{state:AppState;setState:React.Dispatch<React.SetStateAction<AppState>>;section:AdminSection;setSection:(s:AdminSection)=>void;notify:(s:string)=>void;onBack:()=>void;viewerId:number}){
+function AdminView({state,setState,section,setSection,notify,onBack,viewerId,refresh}:{state:AppState;setState:React.Dispatch<React.SetStateAction<AppState>>;section:AdminSection;setSection:(s:AdminSection)=>void;notify:(s:string)=>void;onBack:()=>void;viewerId:number;refresh:()=>Promise<void>}){
   const [draft,setDraft]=useState<AppState>(state);
   const [plan,setPlan]=useState({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"});
   const [userSearch,setUserSearch]=useState("");
@@ -457,31 +457,31 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
   const [newAdminId,setNewAdminId]=useState("");
   const [transferId,setTransferId]=useState("");
   const [proofView,setProofView]=useState("");
+  const [busy,setBusy]=useState(false);
   const isOwner=viewerId===state.security.ownerId;
   useEffect(()=>setDraft(state),[state]);
 
-  function saveSettings(){
-    setState({...draft});
-    notify("Frontend settings saved");
+  async function run(action:()=>Promise<any>,success:string){
+    if(busy)return;
+    try{setBusy(true);await action();await refresh();notify(success)}
+    catch(e:any){notify(e?.message||"Action failed")}
+    finally{setBusy(false)}
   }
-  function addPlan(e:React.FormEvent){
+  async function saveSettings(){
+    await run(()=>adminSaveSettingsBackend(draft.settings),"Settings saved");
+  }
+  async function addPlan(e:React.FormEvent){
     e.preventDefault();
     const price=Number(plan.price),daily=Number(plan.dailyReward),days=Number(plan.durationDays);
     if(!plan.name||price<=0||daily<0||days<=0){notify("Complete all package fields");return}
-    const item:Plan={id:uid("plan"),name:plan.name,price,dailyReward:daily,durationDays:days,badge:plan.badge||"VIP",active:true};
-    setDraft(s=>({...s,plans:[item,...s.plans]}));
-    setState(s=>({...s,plans:[item,...s.plans]}));
-    setPlan({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"});
-    notify("Package created");
+    await run(async()=>{await adminCreatePlanBackend({name:plan.name,price,dailyReward:daily,durationDays:days,badge:plan.badge||"VIP"});setPlan({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"})},"Package created");
   }
-  function togglePlan(id:string){
-    setDraft(s=>({...s,plans:s.plans.map(x=>x.id===id?{...x,active:!x.active}:x)}));
-    setState(s=>({...s,plans:s.plans.map(x=>x.id===id?{...x,active:!x.active}:x)}));
+  async function togglePlan(id:string){
+    const item=state.plans.find(x=>x.id===id); if(!item)return;
+    await run(()=>adminTogglePlanBackend(id,!item.active),item.active?"Package disabled":"Package enabled");
   }
-  function deletePlan(id:string){
-    setDraft(s=>({...s,plans:s.plans.filter(x=>x.id!==id)}));
-    setState(s=>({...s,plans:s.plans.filter(x=>x.id!==id)}));
-    notify("Package deleted");
+  async function deletePlan(id:string){
+    await run(()=>adminDeletePlanBackend(id),"Package deleted");
   }
   function changeMethod(id:string,key:keyof PaymentMethod,value:any){
     setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.map(x=>x.id===id?{...x,[key]:value}:x)}}));
@@ -492,66 +492,37 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
   function removeMethod(id:string){
     setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.filter(x=>x.id!==id)}}));
   }
-  function reviewRequest(id:string,approve:boolean){
-    setState(s=>{
-      const req=s.requests.find(x=>x.id===id);
-      if(!req||req.status!=="pending")return s;
-      const userId=Number(req.telegramId||0);
-      let balance=s.balance;
-      let transactions=s.transactions;
-      let users=s.users;
-      if(approve&&req.type==="deposit"){
-        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
-        if(userId===viewerId)balance+=req.amount;
-        transactions=[{id:uid("tx"),type:"deposit",amount:req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      }
-      if(!approve&&req.type==="withdraw"){
-        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
-        if(userId===viewerId)balance+=req.amount;
-      }
-      if(approve&&req.type==="withdraw"){
-        transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      }
-      return {...s,balance,users,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
-    });
-    notify(approve?"Request approved":"Request rejected");
+  async function reviewRequest(id:string,approve:boolean){
+    const req=state.requests.find(x=>x.id===id); if(!req)return;
+    await run(()=>adminReviewRequestBackend(id,req.type,approve),approve?"Request approved":"Request rejected");
   }
-  function adjustUserBalance(id:number,mode:"add"|"remove"){
+  async function adjustUserBalance(id:number,mode:"add"|"remove"){
     const amount=Number(balanceEdits[id]||0);
     if(!amount||amount<=0){notify("Enter a valid amount");return}
-    setState(s=>{
-      const target=s.users.find(u=>u.telegramId===id); if(!target)return s;
-      const next=mode==="add"?target.balance+amount:Math.max(0,target.balance-amount);
-      return {...s,balance:id===viewerId?next:s.balance,users:s.users.map(u=>u.telegramId===id?{...u,balance:next}:u)};
-    });
-    setBalanceEdits(v=>({...v,[id]:""}));
-    notify(mode==="add"?"Balance added":"Balance removed");
+    const delta=mode==="add"?amount:-amount;
+    await run(async()=>{await adminAdjustBalanceBackend(id,delta);setBalanceEdits(v=>({...v,[id]:""}))},mode==="add"?"Balance added":"Balance removed");
   }
-  function toggleBan(id:number){
+  async function toggleBan(id:number){
     if(id===state.security.ownerId){notify("Owner cannot be banned");return}
-    setState(s=>({...s,users:s.users.map(u=>u.telegramId===id?{...u,banned:!u.banned}:u)}));
+    const user=state.users.find(x=>x.telegramId===id); if(!user)return;
+    await run(()=>adminSetBanBackend(id,!user.banned),user.banned?"User unbanned":"User banned");
   }
-  function addAdmin(){
+  async function addAdmin(){
     if(!isOwner){notify("Only the owner can manage admins");return}
-    const id=Number(newAdminId); if(!id){notify("Enter a valid Telegram ID");return}
-    if(id===state.security.ownerId){notify("This user is already the owner");return}
-    setState(s=>({...s,security:{...s.security,adminIds:Array.from(new Set([...s.security.adminIds,id]))},users:s.users.some(u=>u.telegramId===id)?s.users:[{telegramId:id,name:"Admin User",username:"",balance:0,vipEarnings:0,referralEarnings:0,joinedAt:now(),lastSeen:now(),banned:false},...s.users]}));
-    setNewAdminId("");notify("Admin added");
+    const id=Number(newAdminId);if(!id){notify("Enter a valid Telegram ID");return}
+    await run(async()=>{await ownerAddAdminBackend(id);setNewAdminId("")},"Admin added");
   }
-  function removeAdmin(id:number){
+  async function removeAdmin(id:number){
     if(!isOwner){notify("Only the owner can manage admins");return}
-    setState(s=>({...s,security:{...s.security,adminIds:s.security.adminIds.filter(x=>x!==id)}}));notify("Admin removed");
+    await run(()=>ownerRemoveAdminBackend(id),"Admin removed");
   }
-  function transferOwnership(){
+  async function transferOwnership(){
     if(!isOwner){notify("Only the owner can transfer ownership");return}
-    const id=Number(transferId); if(!id||id===state.security.ownerId){notify("Enter a different valid Telegram ID");return}
-    const oldOwner=state.security.ownerId;
-    setState(s=>({...s,security:{ownerId:id,adminIds:Array.from(new Set([...s.security.adminIds.filter(x=>x!==id),oldOwner]))},users:s.users.some(u=>u.telegramId===id)?s.users:[{telegramId:id,name:"New Owner",username:"",balance:0,vipEarnings:0,referralEarnings:0,joinedAt:now(),lastSeen:now(),banned:false},...s.users]}));
-    setTransferId("");notify("Ownership transferred");
+    const id=Number(transferId);if(!id||id===state.security.ownerId){notify("Enter a different valid Telegram ID");return}
+    await run(async()=>{await ownerTransferBackend(id);setTransferId("")},"Ownership transferred");
   }
-  function reset(){
-    const next=cloneDefault();
-    setDraft(next);setState(next);notify("AFGlion data reset");
+  async function reset(){
+    try{setBusy(true);await refresh();notify("Reloaded from server")}catch(e:any){notify(e?.message||"Reload failed")}finally{setBusy(false)}
   }
 
   return <>
@@ -581,7 +552,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
 
     {section==="plans"&&<>
       <form className="admin-card form-grid" onSubmit={addPlan}>
-        <div className="card-title"><Crown/><div><b>Create Stake Package</b><span>Add a new frontend package.</span></div></div>
+        <div className="card-title"><Crown/><div><b>Create Stake Package</b><span>Add a new package.</span></div></div>
         <input value={plan.name} onChange={e=>setPlan({...plan,name:e.target.value})} placeholder="Package name"/>
         <div className="two"><input inputMode="decimal" value={plan.price} onChange={e=>setPlan({...plan,price:e.target.value})} placeholder="Price AFN"/><input inputMode="decimal" value={plan.dailyReward} onChange={e=>setPlan({...plan,dailyReward:e.target.value})} placeholder="Daily reward AFN"/></div>
         <div className="two"><input inputMode="numeric" value={plan.durationDays} onChange={e=>setPlan({...plan,durationDays:e.target.value})} placeholder="Duration days"/><input value={plan.badge} onChange={e=>setPlan({...plan,badge:e.target.value})} placeholder="Badge"/></div>
@@ -617,7 +588,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
           <div><span>Request ID</span><b className="mono">{r.id}</b></div>
           <div><span>Date & Time</span><b>{new Date(r.createdAt).toLocaleString()}</b></div>
         </div>
-        {r.type==="deposit"&&<div className="proof-admin">{r.proofDataUrl?<button type="button" onClick={()=>setProofView(r.proofDataUrl||"")}><img src={r.proofDataUrl} alt="Payment proof"/><span><b>Payment Proof</b><small>{r.proofName||"Uploaded image"} • Tap to view</small></span><ChevronRight/></button>:<div className="proof-missing"><X/><span><b>No proof attached</b><small>Older request or missing image</small></span></div>}</div>}
+        {r.type==="deposit"&&<div className="proof-admin">{(r.proofUrl||r.proofDataUrl)?<button type="button" onClick={()=>setProofView(r.proofUrl||r.proofDataUrl||"")}><img src={r.proofUrl||r.proofDataUrl} alt="Payment proof"/><span><b>Payment Proof</b><small>{r.proofName||"Uploaded image"} • Tap to view</small></span><ChevronRight/></button>:<div className="proof-missing"><X/><span><b>No proof attached</b><small>Older request or missing image</small></span></div>}</div>}
         {r.status==="pending"?<div className="request-actions"><button type="button" className="approve" onClick={()=>reviewRequest(r.id,true)}><Check/> Approve</button><button type="button" className="reject" onClick={()=>reviewRequest(r.id,false)}><X/> Reject</button></div>:<div className="processed-note"><ShieldCheck/> Request processed: {r.status}</div>}
       </article>)}
       {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here with full details."/>}
@@ -626,7 +597,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
     {section==="channels"&&<section className="admin-card form-grid">
       <div className="card-title"><Radio/><div><b>Official Channels</b><span>Maximum two channels.</span></div></div>
       {[0,1].map(i=><div className="channel-edit" key={i}><input value={draft.settings.channels[i]?.name||""} onChange={e=>setDraft(s=>{const arr=[...s.settings.channels];arr[i]={name:e.target.value,url:arr[i]?.url||""};return {...s,settings:{...s.settings,channels:arr.filter((x,j)=>j<=1)}}})} placeholder={"Channel "+(i+1)+" name"}/><input value={draft.settings.channels[i]?.url||""} onChange={e=>setDraft(s=>{const arr=[...s.settings.channels];arr[i]={name:arr[i]?.name||"",url:e.target.value};return {...s,settings:{...s.settings,channels:arr.filter((x,j)=>j<=1)}}})} placeholder="https://t.me/channel"/></div>)}
-      <button className="gold-button" type="button" onClick={()=>{setState({...draft,settings:{...draft.settings,channels:draft.settings.channels.filter(x=>x.name&&x.url).slice(0,2)}});notify("Channels saved")}}><Check/> Save Channels</button>
+      <button className="gold-button" type="button" disabled={busy} onClick={saveSettings}><Check/> Save Channels</button>
     </section>}
 
     {section==="team"&&<>
@@ -647,7 +618,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
       <label>Referral commission %</label><div className="icon-input"><BadgePercent/><input inputMode="decimal" value={draft.settings.referralPercent} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,referralPercent:Math.max(0,Math.min(100,Number(e.target.value)))}}))}/></div>
       <label>Announcement</label><textarea value={draft.settings.announcement} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,announcement:e.target.value}}))}/>
       <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save All Settings</button>
-      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset Frontend Demo</button>
+      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reload from Server</button>
     </section>}
     {proofView&&<motion.div className="proof-viewer" initial={{opacity:0}} animate={{opacity:1}} onClick={()=>setProofView("")}><div onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setProofView("")}><X/></button><img src={proofView} alt="Payment proof full view"/></div></motion.div>}
   </>
