@@ -93,3 +93,14 @@ body{min-height:100vh}
 
 /* owner admin click fix */
 .topbar{position:sticky;top:0;z-index:50}.top-actions{position:relative;z-index:60}.admin-chip{position:relative;z-index:70;pointer-events:auto;cursor:pointer;touch-action:manipulation}.admin-tabs button,.admin-back,.review button,.gold-button{pointer-events:auto;touch-action:manipulation}
+
+/* hard click + wallet sheet fix */
+button{pointer-events:auto!important;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.glow,.hero-orb,.network-orb,.gold-button:after{pointer-events:none!important}
+.page{position:relative;z-index:1}
+.admin-tabs{position:relative;z-index:5}.admin-tabs button{position:relative;z-index:6}.admin-tabs button.active{background:#211b0f;color:var(--gold);border-color:#4a3b1f;box-shadow:0 0 0 1px rgba(245,196,81,.06) inset}
+.wallet-actions-grid{position:relative;z-index:4}.wallet-actions-grid button{position:relative;z-index:5}
+.wallet-sheet-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.68);backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+.wallet-sheet{width:min(500px,100%);max-height:86vh;overflow:auto;margin:0!important;border-radius:24px 24px 18px 18px!important;border-color:#3a3020!important;box-shadow:0 -18px 60px rgba(0,0,0,.5);animation:sheetUp .22s ease-out}
+@keyframes sheetUp{from{transform:translateY(35px);opacity:0}to{transform:translateY(0);opacity:1}}
+.wallet-sheet .form-head{position:sticky;top:-1px;z-index:2;background:#111;padding:4px 0 8px}
