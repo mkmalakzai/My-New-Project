@@ -1,124 +1,567 @@
 "use client";
+
 import {useEffect,useMemo,useState} from "react";
 import {AnimatePresence,motion} from "framer-motion";
-import {ArrowDownToLine,ArrowUpFromLine,Bell,ChevronRight,Crown,Home,ShieldCheck,Users,WalletCards,Copy,History,Settings,LogOut,Image as ImageIcon,Radio,Sparkles,Headphones,LockKeyhole,TrendingUp,Zap,Plus,Trash2,Landmark,Smartphone,BadgePercent,SlidersHorizontal} from "lucide-react";
-import {adminApproveDeposit,adminApproveWithdrawal,adminCreatePlan,adminList,adminTogglePlan,buyVip,claimVip,createDeposit,createWithdrawal,getActiveVipPlans,getAllVipPlans,getMyVip,getReferrals,getTransactions,getUser,getPublicSettings,savePublicSettings,uploadDepositProof} from "@/lib/firestore";
-import {authenticateTelegram} from "@/lib/auth";
-import type {TransactionDoc,UserDoc,VipPlanDoc,VipPurchaseDoc} from "@/lib/models";
+import {
+  ArrowDownToLine,ArrowUpFromLine,BadgePercent,Bell,Check,ChevronRight,Copy,
+  Crown,Gift,History,Home,Landmark,LockKeyhole,LogOut,Plus,Radio,RefreshCw,
+  Settings,ShieldCheck,Smartphone,Sparkles,Trash2,TrendingUp,UserRound,
+  Users,WalletCards,X,Zap
+} from "lucide-react";
 
-type Tab="home"|"vip"|"referral"|"wallet"|"admin";
-type TgUser={id:number;first_name:string;username?:string;photo_url?:string};
-declare global{interface Window{Telegram?:{WebApp?:{initData?:string;initDataUnsafe?:{user?:TgUser;start_param?:string};ready?:()=>void;expand?:()=>void;setHeaderColor?:(c:string)=>void;setBackgroundColor?:(c:string)=>void;openTelegramLink?:(u:string)=>void;showAlert?:(m:string)=>void}}}}
+type Tab="home"|"stake"|"referral"|"wallet"|"admin";
+type Sheet="deposit"|"withdraw"|"notifications"|"profile"|null;
+type AdminSection="overview"|"plans"|"payments"|"requests"|"channels"|"settings";
 
-const usd=(n:number)=>Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2})+" AFN";
-const toast=(m:string)=>{const showAlert=window.Telegram?.WebApp?.showAlert;if(showAlert){showAlert(m);return;}window.alert(m);};
+type PaymentMethod={id:string;name:string;details:string;active:boolean;kind:"deposit"|"withdraw"|"both"};
+type Plan={id:string;name:string;price:number;dailyReward:number;durationDays:number;badge:string;active:boolean};
+type Stake={id:string;planId:string;planName:string;price:number;dailyReward:number;durationDays:number;startedAt:number;claimed:number;status:"active"|"completed"};
+type Tx={id:string;type:string;amount:number;status:string;createdAt:number;note?:string};
+type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number};
+type ReferralItem={id:string;name:string;joinedAt:number;status:"joined"|"rewarded";reward:number};
+type SettingsDoc={
+  currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;
+  minWithdraw:number;maxWithdraw:number;referralPercent:number;announcement:string;
+  channels:{name:string;url:string}[];paymentMethods:PaymentMethod[];
+};
+type AppState={
+  balance:number;vipEarnings:number;referralEarnings:number;
+  plans:Plan[];stakes:Stake[];transactions:Tx[];requests:RequestItem[];
+  referrals:ReferralItem[];settings:SettingsDoc;
+};
+
+const OWNER_ID=6589090462;
+const STORE_KEY="afglion_frontend_v4";
+
+const defaultState:AppState={
+  balance:0,
+  vipEarnings:0,
+  referralEarnings:0,
+  plans:[
+    {id:"lion-start",name:"Lion Start",price:1000,dailyReward:8,durationDays:30,badge:"START",active:true},
+    {id:"lion-pro",name:"Lion Pro",price:3000,dailyReward:27,durationDays:60,badge:"POPULAR",active:true},
+    {id:"lion-elite",name:"Lion Elite",price:6000,dailyReward:60,durationDays:90,badge:"ELITE",active:true}
+  ],
+  stakes:[],
+  transactions:[],
+  requests:[],
+  referrals:[],
+  settings:{
+    currency:"AFN",currencySymbol:"؋",
+    minDeposit:100,maxDeposit:100000,
+    minWithdraw:100,maxWithdraw:50000,
+    referralPercent:5,
+    announcement:"Welcome to AFGlion — your premium finance dashboard.",
+    channels:[],
+    paymentMethods:[
+      {id:"hesab-pay",name:"HESAB PAY",details:"Add your HESAB PAY number or payment instructions.",active:true,kind:"both"},
+      {id:"momo",name:"MOMO",details:"Add your MOMO number or payment instructions.",active:true,kind:"both"}
+    ]
+  }
+};
+
+const cloneDefault=():AppState=>JSON.parse(JSON.stringify(defaultState));
+const money=(n:number)=>Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2})+" AFN";
+const now=()=>Date.now();
+const uid=(p:string)=>p+"-"+Date.now()+"-"+Math.random().toString(36).slice(2,7);
 
 export default function App(){
- const [tab,setTab]=useState<Tab>("home"),[allowed,setAllowed]=useState<boolean|null>(null),[tg,setTg]=useState<TgUser|null>(null),[user,setUser]=useState<UserDoc|null>(null),[plans,setPlans]=useState<VipPlanDoc[]>([]),[vips,setVips]=useState<VipPurchaseDoc[]>([]),[txs,setTxs]=useState<TransactionDoc[]>([]),[refs,setRefs]=useState<any[]>([]),[settings,setSettings]=useState<any>({currency:"AFN",currencySymbol:"؋",minDeposit:100,maxDeposit:100000,minWithdraw:100,maxWithdraw:50000,referralPercent:5,depositMethods:[{id:"hesab-pay",name:"HESAB PAY",details:"Enter HESAB PAY number / payment reference",active:true},{id:"momo",name:"MOMO",details:"Enter MOMO number / payment reference",active:true}],withdrawMethods:[{id:"hesab-pay",name:"HESAB PAY",details:"Enter your HESAB PAY account number",active:true},{id:"momo",name:"MOMO",details:"Enter your MOMO account number",active:true}],channels:[]}),[busy,setBusy]=useState(false);
- const adminId=6589090462;
- const isAdmin=!!tg && (Number(tg.id)===adminId || user?.isAdmin===true);
- async function refresh(id:number){const [u,p,v,t,r,s]=await Promise.all([getUser(id),getActiveVipPlans(),getMyVip(id),getTransactions(id),getReferrals(id),getPublicSettings()]);setUser(u);setPlans(p);setVips(v);setTxs(t);setRefs(r);if(s)setSettings(s)}
- useEffect(()=>{(async()=>{const w=window.Telegram?.WebApp;const telegramUser=w?.initDataUnsafe?.user;if(telegramUser?.id){w?.ready?.();w?.expand?.();w?.setHeaderColor?.("#080808");w?.setBackgroundColor?.("#080808");setAllowed(true);setTg(telegramUser);const raw=w?.initDataUnsafe?.start_param||"";const ref=raw.startsWith("ref_")?Number(raw.slice(4)):null;await authenticateTelegram(w?.initData||"",ref);await refresh(telegramUser.id);return}const webUser:TgUser={id:0,first_name:"AFGlion Guest",username:"web_guest"};setAllowed(true);setTg(webUser);try{const [publicPlans,publicSettings]=await Promise.all([getActiveVipPlans(),getPublicSettings()]);setPlans(publicPlans);if(publicSettings)setSettings(publicSettings)}catch{} })().catch(e=>toast(e.message))},[]);
- const page=useMemo(()=>{if(!tg)return null;const props={tg,user,plans,vips,txs,refs,settings,refresh:()=>refresh(tg.id),setTab,setBusy,busy};if(tab==="vip")return <Vip {...props}/>;if(tab==="referral")return <Referral {...props}/>;if(tab==="wallet")return <Wallet {...props}/>;if(tab==="admin"&&isAdmin)return <Admin tg={tg} settings={settings} refresh={()=>refresh(tg.id)} onBack={()=>setTab("home")}/>;return <Dashboard {...props}/>},[tab,tg,user,plans,vips,txs,refs,settings,busy,isAdmin]);
- if(allowed===null)return <main className="gate"><div className="lion-loader">🦁</div><p>Opening AFGlion...</p></main>;
- return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-icon">🦁</div><div><b>AFG<span>lion</span></b><small>Premium Finance</small></div></div><div className="top-actions">{isAdmin&&<button type="button" className="admin-chip" onClick={(e)=>{e.preventDefault();e.stopPropagation();setTab("admin")}}><Settings size={14}/> Admin Panel</button>}<button className="icon-button"><Bell size={18}/></button></div></header>
- <AnimatePresence mode="wait"><motion.section key={tab} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="page">{page}</motion.section></AnimatePresence>
- {tab!=="admin"&&<nav className="bottom-nav"><Nav a={tab==="home"} l="Home" i={<Home/>} c={()=>setTab("home")}/><Nav a={tab==="vip"} l="VIP" i={<Crown/>} c={()=>setTab("vip")}/><Nav a={tab==="referral"} l="Referral" i={<Users/>} c={()=>setTab("referral")}/><Nav a={tab==="wallet"} l="Wallet" i={<WalletCards/>} c={()=>setTab("wallet")}/></nav>}</main>
+  const [tab,setTab]=useState<Tab>("home");
+  const [sheet,setSheet]=useState<Sheet>(null);
+  const [adminSection,setAdminSection]=useState<AdminSection>("overview");
+  const [state,setState]=useState<AppState>(cloneDefault());
+  const [ready,setReady]=useState(false);
+  const [toast,setToast]=useState("");
+  const [tgId,setTgId]=useState(0);
+  const [name,setName]=useState("AFGlion Guest");
+  const [username,setUsername]=useState("");
+  const [photo,setPhoto]=useState("");
+  const [adminPreview,setAdminPreview]=useState(false);
+  const [confirmPlan,setConfirmPlan]=useState<Plan|null>(null);
+
+  useEffect(()=>{
+    try{
+      const raw=localStorage.getItem(STORE_KEY);
+      if(raw){
+        const parsed=JSON.parse(raw);
+        setState({...cloneDefault(),...parsed,settings:{...cloneDefault().settings,...parsed.settings}});
+      }
+    }catch{}
+    const params=new URLSearchParams(window.location.search);
+    setAdminPreview(params.get("admin")==="true");
+    const w=(window as any).Telegram?.WebApp;
+    const u=w?.initDataUnsafe?.user;
+    if(u?.id){
+      setTgId(Number(u.id));
+      setName(u.first_name||"AFGlion User");
+      setUsername(u.username||"");
+      setPhoto(u.photo_url||"");
+      w?.ready?.(); w?.expand?.();
+      w?.setHeaderColor?.("#080808"); w?.setBackgroundColor?.("#080808");
+    }
+    setReady(true);
+  },[]);
+
+  useEffect(()=>{
+    if(!ready)return;
+    localStorage.setItem(STORE_KEY,JSON.stringify(state));
+  },[state,ready]);
+
+  useEffect(()=>{
+    if(!toast)return;
+    const t=setTimeout(()=>setToast(""),2600);
+    return()=>clearTimeout(t);
+  },[toast]);
+
+  const isAdmin=tgId===OWNER_ID||adminPreview;
+  const activeStake=state.stakes.find(x=>x.status==="active");
+  const totalEarned=state.vipEarnings+state.referralEarnings;
+  const portfolio=state.balance+totalEarned;
+  const activePlans=state.plans.filter(x=>x.active);
+  const depositMethods=state.settings.paymentMethods.filter(x=>x.active&&(x.kind==="deposit"||x.kind==="both"));
+  const withdrawMethods=state.settings.paymentMethods.filter(x=>x.active&&(x.kind==="withdraw"||x.kind==="both"));
+
+  function notify(message:string){setToast(message)}
+  function openTab(t:Tab){setTab(t);window.scrollTo({top:0,behavior:"smooth"})}
+  function updateState(fn:(s:AppState)=>AppState){setState(prev=>fn(prev))}
+  function addTx(type:string,amount:number,status:string,note?:string){
+    updateState(s=>({...s,transactions:[{id:uid("tx"),type,amount,status,createdAt:now(),note},...s.transactions]}));
+  }
+  function copy(text:string){
+    navigator.clipboard?.writeText(text).then(()=>notify("Copied to clipboard")).catch(()=>notify("Copy failed"));
+  }
+  function openTelegram(url:string){
+    const w=(window as any).Telegram?.WebApp;
+    if(w?.openTelegramLink)w.openTelegramLink(url); else window.open(url,"_blank");
+  }
+  function referralLink(){
+    const id=tgId||6589090462;
+    return "https://t.me/Afglionbot?startapp=ref_"+id;
+  }
+  function activatePlan(plan:Plan){
+    if(state.balance<plan.price){
+      setConfirmPlan(null);
+      notify("Balance is too low — deposit first.");
+      setSheet("deposit");
+      return;
+    }
+    updateState(s=>({
+      ...s,
+      balance:s.balance-plan.price,
+      stakes:[{id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"},...s.stakes],
+      transactions:[{id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name},...s.transactions]
+    }));
+    setConfirmPlan(null);
+    notify(plan.name+" activated");
+  }
+  function claimDemo(stake:Stake){
+    const elapsed=Math.floor((now()-stake.startedAt)/86400000);
+    const available=Math.max(0,elapsed*stake.dailyReward-stake.claimed);
+    if(available<=0){notify("No reward available yet");return}
+    updateState(s=>({
+      ...s,
+      balance:s.balance+available,
+      vipEarnings:s.vipEarnings+available,
+      stakes:s.stakes.map(x=>x.id===stake.id?{...x,claimed:x.claimed+available}:x),
+      transactions:[{id:uid("tx"),type:"vip_reward",amount:available,status:"completed",createdAt:now(),note:stake.planName},...s.transactions]
+    }));
+    notify(money(available)+" claimed");
+  }
+
+  const common={state,setState,notify,openTab,setSheet,name,username,photo,tgId,isAdmin,activeStake,activePlans,depositMethods,withdrawMethods,portfolio,totalEarned,referralLink,copy,openTelegram,activatePlan,claimDemo,setConfirmPlan};
+
+  if(!ready)return <main className="loading"><motion.div animate={{scale:[1,1.1,1],rotate:[0,4,-4,0]}} transition={{repeat:Infinity,duration:2}} className="loader-lion">🦁</motion.div><span>Opening AFGlion...</span></main>;
+
+  return <main className="app-shell">
+    <header className="topbar">
+      <button className="brand" onClick={()=>openTab("home")} type="button">
+        <motion.span className="brand-icon" animate={{rotate:[0,3,-3,0]}} transition={{repeat:Infinity,duration:4}}>🦁</motion.span>
+        <span><b>AFG<em>lion</em></b><small>Premium Finance</small></span>
+      </button>
+      <div className="top-actions">
+        {isAdmin&&<button className="admin-chip" type="button" onClick={()=>openTab("admin")}><Settings/> Admin</button>}
+        <button className="icon-button" type="button" onClick={()=>setSheet("notifications")}><Bell/></button>
+        <button className="avatar-button" type="button" onClick={()=>setSheet("profile")}>{photo?<img src={photo} alt="profile"/>:<UserRound/>}</button>
+      </div>
+    </header>
+
+    <AnimatePresence mode="wait">
+      <motion.section className="page" key={tab} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} transition={{duration:.2}}>
+        {tab==="home"&&<HomeView {...common}/>}
+        {tab==="stake"&&<StakeView {...common}/>}
+        {tab==="referral"&&<ReferralView {...common}/>}
+        {tab==="wallet"&&<WalletView {...common}/>}
+        {tab==="admin"&&isAdmin&&<AdminView state={state} setState={setState} section={adminSection} setSection={setAdminSection} notify={notify} onBack={()=>openTab("home")}/>}
+        {tab==="admin"&&!isAdmin&&<EmptyState icon={<LockKeyhole/>} title="Admin access only" text="Open AFGlion with the owner Telegram account."/>}
+      </motion.section>
+    </AnimatePresence>
+
+    {tab!=="admin"&&<nav className="bottom-nav">
+      <Nav active={tab==="home"} label="Home" icon={<Home/>} onClick={()=>openTab("home")}/>
+      <Nav active={tab==="stake"} label="Stake" icon={<Crown/>} onClick={()=>openTab("stake")}/>
+      <Nav active={tab==="referral"} label="Referral" icon={<Users/>} onClick={()=>openTab("referral")}/>
+      <Nav active={tab==="wallet"} label="Wallet" icon={<WalletCards/>} onClick={()=>openTab("wallet")}/>
+    </nav>}
+
+    <AnimatePresence>
+      {sheet&&<SheetLayer type={sheet} close={()=>setSheet(null)} state={state} setState={setState} notify={notify} depositMethods={depositMethods} withdrawMethods={withdrawMethods} name={name} username={username} tgId={tgId}/>}
+      {confirmPlan&&<ConfirmPlan plan={confirmPlan} balance={state.balance} close={()=>setConfirmPlan(null)} confirm={()=>activatePlan(confirmPlan)}/>}
+      {toast&&<motion.div className="toast" initial={{opacity:0,y:20,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:12}}><Check/> {toast}</motion.div>}
+    </AnimatePresence>
+  </main>
 }
-function Nav({a,l,i,c}:{a:boolean;l:string;i:React.ReactNode;c:()=>void}){return <button className={"nav-item "+(a?"active":"")} onClick={c}>{i}<span>{l}</span></button>}
-function Dashboard(p:any){
- const active=p.vips.find((v:VipPurchaseDoc)=>v.status==="active");
- const totalPortfolio=Number(p.user?.balance||0)+Number(p.user?.totalVipProfit||0)+Number(p.user?.referralEarnings||0);
- const daysLeft=active?Math.max(0,Math.ceil((active.endAt-Date.now())/86400000)):0;
- const vipProgress=active?Math.min(100,Math.max(0,((Date.now()-active.startAt)/(active.endAt-active.startAt))*100)):0;
- return <><div className="hello"><div><small>Welcome back</small><h1>{p.tg.first_name} 👋</h1><span className="verified-line"><ShieldCheck/> Verified AFGlion member</span></div><div className="avatar">{p.tg.photo_url?<img src={p.tg.photo_url}/>: "🦁"}</div></div>
- <div className="portfolio-hero"><div className="hero-orb"/><div className="portfolio-top"><span>MY PORTFOLIO</span><span className="live-dot">● LIVE</span></div><h2>{usd(totalPortfolio)}</h2><p>Total account value</p><div className="portfolio-mini"><div><span>Available</span><b>{usd(p.user?.balance)}</b></div><div><span>Total earned</span><b>{usd(Number(p.user?.totalVipProfit||0)+Number(p.user?.referralEarnings||0))}</b></div></div></div>
- <div className="quick-grid"><button onClick={()=>p.setTab("wallet")}><span><ArrowDownToLine/></span><b>Deposit</b><small>Add funds</small></button><button onClick={()=>p.setTab("wallet")}><span><ArrowUpFromLine/></span><b>Withdraw</b><small>Cash out</small></button><button onClick={()=>p.setTab("vip")}><span><Crown/></span><b>VIP</b><small>Earn daily</small></button><button onClick={()=>p.setTab("referral")}><span><Users/></span><b>Invite</b><small>Get rewards</small></button></div>
- {p.settings?.announcement&&<div className="announcement premium"><Bell/><div><b>AFGlion Announcement</b><span>{p.settings.announcement}</span></div><ChevronRight/></div>}
- <Title t="VIP Center" a="All packages" c={()=>p.setTab("vip")}/>{active?<div className="vip-progress-card"><div className="vip-progress-head"><div className="vip-crown"><Crown/></div><div><small>ACTIVE PACKAGE</small><b>{active.planName}</b></div><strong>{usd(active.dailyReward)}<small>/day</small></strong></div><div className="progress-track"><i style={{width:vipProgress+"%"}}/></div><div className="progress-meta"><span>{daysLeft} days remaining</span><span>{usd(active.claimedReward)} claimed</span></div></div>:<div className="upgrade-banner"><div><span className="eyebrow">START EARNING</span><h3>Unlock daily VIP rewards</h3><p>Choose a package that fits your balance and start your AFGlion journey.</p><button onClick={()=>p.setTab("vip")}>Explore VIP <ChevronRight/></button></div><Crown/></div>}
- <div className="stats-grid rich"><Stat t="VIP Profit" v={usd(p.user?.totalVipProfit)} h="Lifetime earnings"/><Stat t="Referral Rewards" v={usd(p.user?.referralEarnings)} h={p.refs.length+" invited users"}/></div>
- <div className="referral-banner" onClick={()=>p.setTab("referral")}><div className="ref-icon"><Users/></div><div><small>GROW TOGETHER</small><b>Invite friends. Earn rewards.</b><span>Your personal referral network is ready.</span></div><ChevronRight/></div>
- <Title t="AFGlion Community"/>{p.settings?.channels?.length>0?<div className="channel-grid">{p.settings.channels.slice(0,2).map((x:any)=><button key={x.url} onClick={()=>{if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(x.url);else window.open(x.url,"_blank")}}><Radio/><div><b>{x.name}</b><span>Official community</span></div><ChevronRight/></button>)}</div>:<div className="channel-empty"><Radio/><div><b>Official channels</b><span>Add up to two channels from Admin Panel → Settings.</span></div></div>}
- <Title t="Account Center"/><div className="account-center"><div><span><LockKeyhole/></span><b>Security</b><small>Protected account</small></div><div><span><Headphones/></span><b>Support</b><small>Get assistance</small></div><div><span><TrendingUp/></span><b>Activity</b><small>{p.txs.length} records</small></div></div>
- <Title t="Recent Activity" a={p.txs.length>3?"View wallet":undefined} c={()=>p.setTab("wallet")}/>{p.txs.slice(0,4).map((x:TransactionDoc)=><Tx key={x.id} x={x}/>)}{!p.txs.length&&<Empty icon={<History/>} title="Your journey starts here" text="Deposits, VIP rewards and withdrawals will appear here."/>}
- <div className="trust-strip"><ShieldCheck/><div><b>AFGlion Secure</b><span>Manual payment review • Account activity tracking</span></div><Sparkles/></div></>
+
+function HomeView(p:any){
+  const s:AppState=p.state;
+  const stake:Stake|undefined=p.activeStake;
+  const progress=stake?Math.min(100,Math.max(0,((now()-stake.startedAt)/(stake.durationDays*86400000))*100)):0;
+  return <>
+    <section className="welcome-row">
+      <div><small>Welcome back</small><h1>{p.name} 👋</h1><span><ShieldCheck/> Verified AFGlion member</span></div>
+      <motion.div className="lion-orbit" animate={{y:[0,-4,0]}} transition={{repeat:Infinity,duration:2.8}}>🦁</motion.div>
+    </section>
+
+    <section className="hero-card">
+      <div className="hero-glow"/>
+      <div className="hero-head"><span>MY PORTFOLIO</span><b><i/> LIVE</b></div>
+      <h2>{money(p.portfolio)}</h2>
+      <p>Total account value</p>
+      <div className="hero-grid">
+        <div><span>Available</span><b>{money(s.balance)}</b></div>
+        <div><span>Total earned</span><b>{money(p.totalEarned)}</b></div>
+      </div>
+    </section>
+
+    <section className="quick-actions">
+      <Quick icon={<ArrowDownToLine/>} title="Deposit" sub="Add funds" onClick={()=>p.setSheet("deposit")}/>
+      <Quick icon={<ArrowUpFromLine/>} title="Withdraw" sub="Cash out" onClick={()=>p.setSheet("withdraw")}/>
+      <Quick icon={<Crown/>} title="Stake" sub="View plans" onClick={()=>p.openTab("stake")}/>
+      <Quick icon={<Users/>} title="Invite" sub="Earn rewards" onClick={()=>p.openTab("referral")}/>
+    </section>
+
+    {s.settings.announcement&&<section className="notice-card"><Bell/><div><b>AFGlion Announcement</b><span>{s.settings.announcement}</span></div><ChevronRight/></section>}
+
+    <SectionTitle title="Stake Center" action="View plans" onClick={()=>p.openTab("stake")}/>
+    {stake?<section className="active-stake">
+      <div className="stake-top"><span className="round-icon"><Crown/></span><div><small>ACTIVE PLAN</small><b>{stake.planName}</b></div><strong>{money(stake.dailyReward)}<small>/day</small></strong></div>
+      <div className="bar"><i style={{width:progress+"%"}}/></div>
+      <div className="bar-meta"><span>{Math.max(0,stake.durationDays-Math.floor((now()-stake.startedAt)/86400000))} days left</span><span>{money(stake.claimed)} claimed</span></div>
+      <button className="soft-button" type="button" onClick={()=>p.claimDemo(stake)}><Zap/> Claim available</button>
+    </section>:<section className="upgrade-card">
+      <div><small>START YOUR JOURNEY</small><h3>Choose an AFGlion plan</h3><p>Browse admin-configured packages and activate one from your wallet balance.</p><button type="button" onClick={()=>p.openTab("stake")}>Explore plans <ChevronRight/></button></div><motion.span animate={{rotate:[-6,6,-6]}} transition={{repeat:Infinity,duration:3}}><Crown/></motion.span>
+    </section>}
+
+    <section className="metric-grid">
+      <Metric title="VIP Rewards" value={money(s.vipEarnings)} sub="Lifetime claimed"/>
+      <Metric title="Referral Rewards" value={money(s.referralEarnings)} sub={s.referrals.length+" referrals"}/>
+    </section>
+
+    <button className="referral-banner" type="button" onClick={()=>p.openTab("referral")}><span className="round-icon green"><Users/></span><div><small>GROW TOGETHER</small><b>Invite friends. Earn rewards.</b><span>{s.settings.referralPercent}% commission is currently configured.</span></div><ChevronRight/></button>
+
+    <SectionTitle title="AFGlion Community"/>
+    {s.settings.channels.length?<section className="channel-grid">{s.settings.channels.map((ch:any)=><button type="button" key={ch.url} onClick={()=>p.openTelegram(ch.url)}><Radio/><div><b>{ch.name}</b><span>Official community</span></div><ChevronRight/></button>)}</section>:<section className="empty-inline"><Radio/><div><b>Official channels</b><span>Admin can add up to two channels from the control panel.</span></div></section>}
+
+    <SectionTitle title="Account Center"/>
+    <section className="account-grid">
+      <button type="button" onClick={()=>p.setSheet("profile")}><span><UserRound/></span><b>Profile</b><small>Account details</small></button>
+      <button type="button" onClick={()=>p.openTab("wallet")}><span><History/></span><b>Activity</b><small>{s.transactions.length} records</small></button>
+      <button type="button" onClick={()=>p.notify("Security center is ready for backend connection.")}><span><LockKeyhole/></span><b>Security</b><small>Protected mode</small></button>
+    </section>
+
+    <SectionTitle title="Recent Activity" action="Wallet" onClick={()=>p.openTab("wallet")}/>
+    {s.transactions.slice(0,4).map((x:Tx)=><TransactionRow key={x.id} item={x}/>)}
+    {!s.transactions.length&&<EmptyState icon={<History/>} title="Your journey starts here" text="Deposits, withdrawals, stake activations and rewards will appear here."/>}
+  </>
 }
-function Vip(p:any){
- const active=p.vips.filter((x:VipPurchaseDoc)=>x.status==="active");
- const earned=p.vips.reduce((s:number,x:VipPurchaseDoc)=>s+Number(x.claimedReward||0),0);
- async function buy(plan:VipPlanDoc){try{if(!p.tg.id)throw new Error("Open AFGlion from Telegram to activate a package.");p.setBusy(true);await buyVip(p.tg.id,plan);await p.refresh();toast("VIP package activated.")}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}
- async function claim(v:VipPurchaseDoc){try{if(!p.tg.id)throw new Error("Open AFGlion from Telegram to claim rewards.");p.setBusy(true);const r=await claimVip(p.tg.id,v.id!);await p.refresh();toast("Claimed "+usd(r))}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}
- return <><div className="page-title"><small>AFGLION MEMBERSHIP</small><h1>VIP Center 👑</h1></div>
- <div className="vip-main-hero"><div><span>PREMIUM MEMBERSHIP</span><h2>Rise through the Lion ranks.</h2><p>Activate a package, track its cycle and collect available daily rewards.</p></div><Crown/></div>
- <div className="three-metrics"><Stat t="Active Plans" v={String(active.length)} h="Running now"/><Stat t="VIP Earned" v={usd(earned)} h="Total claimed"/><Stat t="Packages" v={String(p.plans.length)} h="Available"/></div>
- {active.length>0&&<><Title t="My Active Membership"/>{active.map((v:VipPurchaseDoc)=>{const pct=Math.min(100,Math.max(0,((Date.now()-v.startAt)/(v.endAt-v.startAt))*100));const left=Math.max(0,Math.ceil((v.endAt-Date.now())/86400000));return <div className="membership-card" key={v.id}><div className="membership-top"><div className="vip-crown"><Crown/></div><div><small>ACTIVE VIP</small><h3>{v.planName}</h3></div><span className="active-badge">ACTIVE</span></div><div className="membership-numbers"><div><span>Daily Reward</span><b>{usd(v.dailyReward)}</b></div><div><span>Claimed</span><b>{usd(v.claimedReward)}</b></div><div><span>Days Left</span><b>{left}</b></div></div><div className="progress-track"><i style={{width:pct+"%"}}/></div><button className="gold-button" disabled={p.busy} onClick={()=>claim(v)}><Zap/> Claim Available Reward</button></div>})}</>}
- <Title t="Choose Your Package"/><div className="plans">{p.plans.map((x:VipPlanDoc)=><div className="plan-card upgraded" key={x.id}><div className="plan-top"><div><span className="pill">{x.badge||"VIP"}</span><h3>{x.name}</h3><small>{x.durationDays}-day membership cycle</small></div><Crown/></div><div className="plan-price"><b>{usd(x.price)}</b><span>activation price</span></div><div className="plan-details"><div><span>Daily reward</span><b>{usd(x.dailyReward)}</b></div><div><span>Full duration</span><b>{x.durationDays} days</b></div><div><span>Potential cycle reward</span><b>{usd(x.dailyReward*x.durationDays)}</b></div></div><button disabled={p.busy} onClick={()=>buy(x)}>Stake / Activate {x.name} <ChevronRight/></button></div>)}{!p.plans.length&&<Empty icon={<Crown/>} title="Packages coming soon" text="New AFGlion VIP levels will appear here."/>}</div>
- <div className="info-panel"><ShieldCheck/><div><b>How VIP works</b><span>Fund your wallet → choose an active package → track the cycle → claim available rewards from your membership.</span></div></div>
- <div className="trust-strip"><LockKeyhole/><div><b>Membership records</b><span>Every purchase and reward is recorded in your account activity.</span></div><Sparkles/></div></>
+
+function StakeView(p:any){
+  const s:AppState=p.state;
+  return <>
+    <PageHead eyebrow="AFGLION MEMBERSHIP" title="Stake Center" icon={<Crown/>}/>
+    <section className="stake-hero">
+      <div><small>PREMIUM PLANS</small><h2>Choose your Lion level.</h2><p>Every plan below is editable from the Admin Panel. Rewards shown are admin-configured.</p></div>
+      <motion.span animate={{y:[0,-5,0],rotate:[0,4,0]}} transition={{repeat:Infinity,duration:3}}><Crown/></motion.span>
+    </section>
+
+    <section className="metric-grid three">
+      <Metric title="Available" value={money(s.balance)} sub="Wallet balance"/>
+      <Metric title="Active" value={String(s.stakes.filter(x=>x.status==="active").length)} sub="Plans running"/>
+      <Metric title="Claimed" value={money(s.vipEarnings)} sub="VIP rewards"/>
+    </section>
+
+    {s.stakes.filter(x=>x.status==="active").map(st=><section className="active-stake" key={st.id}>
+      <div className="stake-top"><span className="round-icon"><Crown/></span><div><small>ACTIVE MEMBERSHIP</small><b>{st.planName}</b></div><strong>{money(st.dailyReward)}<small>/day</small></strong></div>
+      <div className="stake-stats"><div><span>Capital</span><b>{money(st.price)}</b></div><div><span>Duration</span><b>{st.durationDays} days</b></div><div><span>Claimed</span><b>{money(st.claimed)}</b></div></div>
+      <button className="gold-button" type="button" onClick={()=>p.claimDemo(st)}><Zap/> Claim available reward</button>
+    </section>)}
+
+    <SectionTitle title="Available Plans"/>
+    <section className="plans-grid">
+      {p.activePlans.map((plan:Plan)=><motion.article whileTap={{scale:.985}} className="plan-card" key={plan.id}>
+        <div className="plan-top"><div><span className="badge">{plan.badge}</span><h3>{plan.name}</h3><small>{plan.durationDays}-day cycle</small></div><span className="plan-crown"><Crown/></span></div>
+        <div className="plan-price"><b>{money(plan.price)}</b><span>activation amount</span></div>
+        <div className="plan-data"><div><span>Daily reward</span><b>{money(plan.dailyReward)}</b></div><div><span>Cycle reward</span><b>{money(plan.dailyReward*plan.durationDays)}</b></div></div>
+        <button className="gold-button" type="button" onClick={()=>p.setConfirmPlan(plan)}>Stake / Activate <ChevronRight/></button>
+      </motion.article>)}
+    </section>
+    {!p.activePlans.length&&<EmptyState icon={<Crown/>} title="No active plans" text="Admin can publish packages from the Admin Panel."/>}
+
+    <section className="info-card"><ShieldCheck/><div><b>Frontend preview mode</b><span>Plan activation works in this frontend demo and is stored on this device. Backend sync will be connected after design approval.</span></div></section>
+  </>
 }
-function Referral(p:any){
- const bot=process.env.NEXT_PUBLIC_BOT_USERNAME||"Afglionbot";const link=`https://t.me/${bot}?startapp=ref_${p.tg.id}`;
- const rewarded=p.refs.filter((r:any)=>r.status==="rewarded").length;const progress=Math.min(100,(p.refs.length/10)*100);
- async function copy(){await navigator.clipboard.writeText(link);toast("Referral link copied.")}
- function share(){const u=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Join me on AFGlion")}`;if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(u);else window.open(u,"_blank")}
- return <><div className="page-title"><small>AFGLION NETWORK</small><h1>Referral Hub 👥</h1></div>
- <div className="referral-hero"><div className="network-orb"/><span>YOUR NETWORK REWARDS</span><h2>{usd(p.user?.referralEarnings)}</h2><p>Build your circle and grow together with AFGlion.</p><div className="referral-hero-stats"><div><b>{p.refs.length}</b><span>Total invites</span></div><div><b>{rewarded}</b><span>Qualified</span></div><div><b>{Math.max(0,p.refs.length-rewarded)}</b><span>Pending</span></div></div></div>
- <div className="commission-card"><BadgePercent/><div><small>REFERRAL COMMISSION</small><b>{Number(p.settings?.referralPercent||0)}% per VIP activation</b><span>Admin controls this percentage from Settings.</span></div></div><div className="network-progress"><div className="network-head"><div><small>NETWORK MILESTONE</small><b>{p.refs.length} / 10 referrals</b></div><Users/></div><div className="progress-track"><i style={{width:progress+"%"}}/></div><span>Invite {Math.max(0,10-p.refs.length)} more to reach your first network milestone.</span></div>
- <Title t="Invite Friends"/><div className="share-card premium-share"><b>Your personal invitation link</b><p>Anyone who joins through this link will be connected to your network.</p><div className="link-box"><span>{link}</span><button onClick={copy}><Copy/></button></div><div className="share-actions"><button onClick={copy}><Copy/> Copy Link</button><button onClick={share}><Users/> Share on Telegram</button></div></div>
- <Title t="How It Works"/><div className="steps-row"><div><span>1</span><b>Share</b><small>Send your link</small></div><i/><div><span>2</span><b>Friend joins</b><small>Account connects</small></div><i/><div><span>3</span><b>Reward</b><small>Track earnings</small></div></div>
- <Title t="Network Overview"/><div className="stats-grid rich"><Stat t="Total Referrals" v={String(p.refs.length)} h="People in network"/><Stat t="Referral Earnings" v={usd(p.user?.referralEarnings)} h="Lifetime rewards"/></div>
- <Title t="My Referrals"/>{p.refs.slice(0,20).map((r:any,i:number)=><div className="ref-person" key={r.id}><div className="ref-avatar">{String(i+1).padStart(2,"0")}</div><div><b>User #{r.invitedTelegramId}</b><span>Joined your AFGlion network</span></div><div className="ref-status"><small>{r.status}</small><b>{usd(r.reward)}</b></div></div>)}{!p.refs.length&&<Empty icon={<Users/>} title="Your network is waiting" text="Copy your referral link and invite your first friend."/>}
- <div className="info-panel"><Sparkles/><div><b>Grow your AFGlion circle</b><span>Your referral totals, qualification status and rewards stay visible here as your network grows.</span></div></div></>
+
+function ReferralView(p:any){
+  const s:AppState=p.state;
+  const link=p.referralLink();
+  return <>
+    <PageHead eyebrow="AFGLION NETWORK" title="Referral Hub" icon={<Users/>}/>
+    <section className="ref-hero">
+      <div className="hero-glow"/>
+      <small>YOUR REFERRAL REWARDS</small><h2>{money(s.referralEarnings)}</h2><p>Grow your network and track your rewards in one place.</p>
+      <div className="ref-stats"><div><b>{s.referrals.length}</b><span>Total invites</span></div><div><b>{s.referrals.filter(x=>x.status==="rewarded").length}</b><span>Rewarded</span></div><div><b>{s.settings.referralPercent}%</b><span>Commission</span></div></div>
+    </section>
+
+    <section className="commission-card"><BadgePercent/><div><small>ADMIN-CONTROLLED RATE</small><b>{s.settings.referralPercent}% referral commission</b><span>Applied according to the configured referral rules.</span></div></section>
+
+    <SectionTitle title="Invite Friends"/>
+    <section className="share-card">
+      <b>Your personal referral link</b><p>Copy or share it directly through Telegram.</p>
+      <div className="link-box"><span>{link}</span><button type="button" onClick={()=>p.copy(link)}><Copy/></button></div>
+      <div className="share-actions"><button type="button" onClick={()=>p.copy(link)}><Copy/> Copy Link</button><button type="button" onClick={()=>p.openTelegram("https://t.me/share/url?url="+encodeURIComponent(link))}><Users/> Share</button></div>
+    </section>
+
+    <SectionTitle title="How It Works"/>
+    <section className="steps">
+      <div><span>1</span><b>Share</b><small>Send your link</small></div><i/>
+      <div><span>2</span><b>Join</b><small>Friend opens app</small></div><i/>
+      <div><span>3</span><b>Reward</b><small>Track commission</small></div>
+    </section>
+
+    <SectionTitle title="My Referrals"/>
+    {s.referrals.map((r:ReferralItem,i:number)=><section className="ref-row" key={r.id}><span>{String(i+1).padStart(2,"0")}</span><div><b>{r.name}</b><small>{new Date(r.joinedAt).toLocaleDateString()} • {r.status}</small></div><strong>{money(r.reward)}</strong></section>)}
+    {!s.referrals.length&&<EmptyState icon={<Users/>} title="Your network is waiting" text="Share your referral link to start building your network."/>}
+  </>
 }
-function Wallet(p:any){
- const [mode,setMode]=useState<"deposit"|"withdraw"|null>(null),[amount,setAmount]=useState(""),[method,setMethod]=useState(""),[ref,setRef]=useState(""),[proof,setProof]=useState<File|null>(null);
- const methods=(mode==="deposit"?p.settings?.depositMethods:p.settings?.withdrawMethods)?.filter((x:any)=>x.active!==false)||[];
- const incoming=p.txs.filter((x:TransactionDoc)=>x.amount>0).reduce((s:number,x:TransactionDoc)=>s+x.amount,0),outgoing=Math.abs(p.txs.filter((x:TransactionDoc)=>x.amount<0).reduce((s:number,x:TransactionDoc)=>s+x.amount,0));
- useEffect(()=>{if(mode&&methods.length)setMethod(methods[0].id)},[mode,methods.length]);
- async function submit(e:React.FormEvent){e.preventDefault();try{if(!p.tg.id)throw new Error("Open AFGlion from Telegram to use wallet actions.");p.setBusy(true);const n=Number(amount);if(!n||n<=0)throw new Error("Enter a valid amount");const min=Number(mode==="deposit"?p.settings?.minDeposit||100:p.settings?.minWithdraw||100),max=Number(mode==="deposit"?p.settings?.maxDeposit||100000:p.settings?.maxWithdraw||50000);if(n<min||n>max)throw new Error(`Amount must be between ${min} and ${max} ${p.settings?.currency||"AFN"}`);const selected=methods.find((x:any)=>x.id===method);if(!selected)throw new Error("Select a payment method");if(mode==="deposit"){if(!proof)throw new Error("Payment proof image is required");const proofUrl=await uploadDepositProof(p.tg.id,proof);await createDeposit({userTelegramId:p.tg.id,amount:n,method:selected.name,txid:ref,proofUrl})}else await createWithdrawal({userTelegramId:p.tg.id,amount:n,method:selected.name,destination:ref});setMode(null);setAmount("");setRef("");setProof(null);await p.refresh();toast("Request submitted for admin review.")}catch(e:any){toast(e.message)}finally{p.setBusy(false)}}
- return <><div className="page-title"><small>AFGLION MONEY CENTER</small><h1>Wallet 💳</h1></div>
- <div className="wallet-premium"><div className="wallet-top"><span>AVAILABLE BALANCE</span><ShieldCheck/></div><h2>{p.settings?.currencySymbol||"؋"}{Number(p.user?.balance||0).toFixed(2)}</h2><small>{p.settings?.currency||"AFN"} • AFGlion Wallet</small><div className="wallet-summary"><div><span>Total In</span><b>+{usd(incoming)}</b></div><div><span>Total Out</span><b>{usd(outgoing)}</b></div></div></div>
- <div className="wallet-actions-grid premium-actions"><button type="button" onClick={()=>setMode("deposit")}><span><ArrowDownToLine/></span><b>Deposit</b><small>Add money manually</small></button><button type="button" onClick={()=>setMode("withdraw")}><span><ArrowUpFromLine/></span><b>Withdraw</b><small>Request payout</small></button></div>
- <div className="limit-strip"><SlidersHorizontal/><div><b>Deposit {Number(p.settings?.minDeposit||100).toLocaleString()}–{Number(p.settings?.maxDeposit||100000).toLocaleString()} AFN</b><span>Withdraw {Number(p.settings?.minWithdraw||100).toLocaleString()}–{Number(p.settings?.maxWithdraw||50000).toLocaleString()} AFN</span></div></div><div className="wallet-strip"><LockKeyhole/><div><b>Manual review protection</b><span>Payment requests are reviewed by AFGlion administration before approval.</span></div></div>
- {mode&&<div className="wallet-sheet-backdrop" onClick={()=>setMode(null)}><form className="wallet-form premium-form wallet-sheet" onClick={e=>e.stopPropagation()} onSubmit={submit}><div className="form-head"><div><small>{mode==="deposit"?"FUND YOUR WALLET":"REQUEST PAYOUT"}</small><b>{mode==="deposit"?"New Deposit":"New Withdrawal"}</b></div><button type="button" onClick={()=>setMode(null)}>×</button></div><label>Amount ({p.settings?.currency||"USD"})</label><input inputMode="decimal" required value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00"/><label>Payment Method</label><select value={method} onChange={e=>setMethod(e.target.value)}>{methods.map((x:any)=><option value={x.id} key={x.id}>{x.name}</option>)}</select>{methods.find((x:any)=>x.id===method)?.details&&<div className="method-details">{methods.find((x:any)=>x.id===method)?.details}</div>}<label>{mode==="deposit"?"TXID / payment reference":"Wallet address / account"}</label><input required value={ref} onChange={e=>setRef(e.target.value)} placeholder="Enter payment details"/>{mode==="deposit"&&<><label>Payment Proof *</label><label className="proof-picker"><ImageIcon/><div><b>{proof?proof.name:"Upload payment screenshot"}</b><span>JPG, PNG or WEBP • max 5 MB</span></div><input type="file" accept="image/*" required onChange={e=>setProof(e.target.files?.[0]||null)}/></label></>}<div className="notice"><ShieldCheck/> Admin verification required before completion</div><button disabled={p.busy} className="gold-button">Submit {mode==="deposit"?"Deposit":"Withdrawal"}</button></form></div>}
- <Title t="Payment Methods"/><div className="payment-method-grid">{[...(p.settings?.depositMethods||[]),...(p.settings?.withdrawMethods||[])].filter((x:any,i:number,a:any[])=>x.active!==false&&a.findIndex(y=>y.id===x.id)===i).slice(0,4).map((x:any)=><div key={x.id}><WalletCards/><div><b>{x.name}</b><span>Available</span></div><i>●</i></div>)}</div>
- <Title t="Transaction Summary"/><div className="three-metrics wallet-metrics"><Stat t="Transactions" v={String(p.txs.length)} h="All activity"/><Stat t="Money In" v={usd(incoming)} h="Credits"/><Stat t="Money Out" v={usd(outgoing)} h="Debits"/></div>
- <Title t="Recent Transactions"/>{p.txs.slice(0,12).map((x:TransactionDoc)=><Tx key={x.id} x={x}/>)}{!p.txs.length&&<Empty icon={<WalletCards/>} title="No wallet activity" text="Your deposits, withdrawals and rewards will be listed here."/>}
- <div className="info-panel"><ShieldCheck/><div><b>Wallet security</b><span>Always verify payment details before sending funds and keep your payment proof until approval.</span></div></div></>
+
+function WalletView(p:any){
+  const s:AppState=p.state;
+  const moneyIn=s.transactions.filter(x=>x.amount>0).reduce((a,b)=>a+b.amount,0);
+  const moneyOut=Math.abs(s.transactions.filter(x=>x.amount<0).reduce((a,b)=>a+b.amount,0));
+  return <>
+    <PageHead eyebrow="AFGLION MONEY CENTER" title="Wallet" icon={<WalletCards/>}/>
+    <section className="wallet-card">
+      <div className="wallet-head"><span>AVAILABLE BALANCE</span><ShieldCheck/></div>
+      <h2>{money(s.balance)}</h2><small>{s.settings.currency} • AFGlion Wallet</small>
+      <div className="wallet-mini"><div><span>Total in</span><b>{money(moneyIn)}</b></div><div><span>Total out</span><b>{money(moneyOut)}</b></div></div>
+    </section>
+
+    <section className="wallet-actions">
+      <button type="button" onClick={()=>p.setSheet("deposit")}><span><ArrowDownToLine/></span><b>Deposit</b><small>Add funds</small></button>
+      <button type="button" onClick={()=>p.setSheet("withdraw")}><span><ArrowUpFromLine/></span><b>Withdraw</b><small>Request payout</small></button>
+    </section>
+
+    <section className="limit-card"><TrendingUp/><div><b>Deposit {money(s.settings.minDeposit)} – {money(s.settings.maxDeposit)}</b><span>Withdraw {money(s.settings.minWithdraw)} – {money(s.settings.maxWithdraw)}</span></div></section>
+
+    <SectionTitle title="Payment Methods"/>
+    <section className="method-grid">
+      {s.settings.paymentMethods.filter(x=>x.active).map((m:PaymentMethod)=><article key={m.id}><span>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}</span><div><b>{m.name}</b><small>{m.kind==="both"?"Deposit & Withdraw":m.kind}</small></div><i/></article>)}
+    </section>
+
+    <SectionTitle title="Requests"/>
+    {s.requests.slice(0,4).map((r:RequestItem)=><section className="request-row" key={r.id}><span className={"status-dot "+r.status}/><div><b>{r.type==="deposit"?"Deposit":"Withdrawal"} • {r.method}</b><small>{new Date(r.createdAt).toLocaleDateString()} • {r.status}</small></div><strong>{money(r.amount)}</strong></section>)}
+    {!s.requests.length&&<EmptyState icon={<WalletCards/>} title="No requests yet" text="Deposit and withdrawal requests will appear here."/>}
+
+    <SectionTitle title="Transactions"/>
+    {s.transactions.slice(0,12).map((x:Tx)=><TransactionRow key={x.id} item={x}/>)}
+    {!s.transactions.length&&<EmptyState icon={<History/>} title="No transactions yet" text="Your account activity will appear here."/>}
+  </>
 }
-function Admin({tg,settings,refresh,onBack}:{tg:TgUser;settings:any;refresh:()=>Promise<void>;onBack:()=>void}){
- const defaultDeposit=[{id:"hesab-pay",name:"HESAB PAY",details:"Enter HESAB PAY number / payment reference",active:true},{id:"momo",name:"MOMO",details:"Enter MOMO number / payment reference",active:true}];
- const defaultWithdraw=[{id:"hesab-pay",name:"HESAB PAY",details:"Enter your HESAB PAY account number",active:true},{id:"momo",name:"MOMO",details:"Enter your MOMO account number",active:true}];
- const [section,setSection]=useState("overview"),[items,setItems]=useState<any[]>([]),[plans,setPlans]=useState<VipPlanDoc[]>([]),[form,setForm]=useState({name:"",price:"",daily:"",days:"",badge:"VIP"}),[busy,setBusy]=useState(false),[cfg,setCfg]=useState<any>({currency:settings?.currency||"AFN",currencySymbol:settings?.currencySymbol||"؋",minDeposit:String(settings?.minDeposit??100),maxDeposit:String(settings?.maxDeposit??100000),minWithdraw:String(settings?.minWithdraw??100),maxWithdraw:String(settings?.maxWithdraw??50000),referralPercent:String(settings?.referralPercent??5),announcement:settings?.announcement||"",depositMethods:settings?.depositMethods?.length?settings.depositMethods:defaultDeposit,withdrawMethods:settings?.withdrawMethods?.length?settings.withdrawMethods:defaultWithdraw,channel1Name:settings?.channels?.[0]?.name||"",channel1Url:settings?.channels?.[0]?.url||"",channel2Name:settings?.channels?.[1]?.name||"",channel2Url:settings?.channels?.[1]?.url||""});
- function load(s=section){setSection(s);void (async()=>{try{if(s==="vip")setPlans(await getAllVipPlans());else if(s!=="overview"&&s!=="settings")setItems(await adminList(s))}catch(e:any){toast(e.message)}})()}
- useEffect(()=>{load("overview")},[]);
- async function addPlan(e:React.FormEvent){e.preventDefault();try{setBusy(true);await adminCreatePlan(tg.id,{name:form.name,price:Number(form.price),dailyReward:Number(form.daily),durationDays:Number(form.days),badge:form.badge,active:true});setForm({name:"",price:"",daily:"",days:"",badge:"VIP"});await load("vip");toast("VIP package created.")}catch(e:any){toast(e.message)}finally{setBusy(false)}}
- async function review(kind:string,id:string,yes:boolean){try{setBusy(true);kind==="deposits"?await adminApproveDeposit(tg.id,id,yes):await adminApproveWithdrawal(tg.id,id,yes);await load(kind);toast(yes?"Approved.":"Rejected.")}catch(e:any){toast(e.message)}finally{setBusy(false)}}
- async function save(e:React.FormEvent){e.preventDefault();try{setBusy(true);const referral=Math.max(0,Math.min(100,Number(cfg.referralPercent||0)));await savePublicSettings({currency:cfg.currency||"AFN",currencySymbol:cfg.currencySymbol||"؋",minDeposit:Number(cfg.minDeposit||0),maxDeposit:Number(cfg.maxDeposit||0),minWithdraw:Number(cfg.minWithdraw||0),maxWithdraw:Number(cfg.maxWithdraw||0),referralPercent:referral,announcement:cfg.announcement,depositMethods:cfg.depositMethods,withdrawMethods:cfg.withdrawMethods,channels:[{name:cfg.channel1Name.trim(),url:cfg.channel1Url.trim()},{name:cfg.channel2Name.trim(),url:cfg.channel2Url.trim()}].filter(x=>x.name&&x.url).slice(0,2),botUsername:"Afglionbot"});await refresh();toast("Settings saved.")}catch(e:any){toast(e.message)}finally{setBusy(false)}}
- return <><div className="admin-head"><div><small>AFGlion Control Center</small><h1>Admin Panel 🦁</h1></div><button type="button" className="admin-back" onClick={onBack}><LogOut/> Back</button></div>
- <div className="admin-tabs"><button type="button" className={section==="overview"?"active":""} onClick={()=>load("overview")}>Overview</button><button type="button" className={section==="users"?"active":""} onClick={()=>load("users")}>Users</button><button type="button" className={section==="vip"?"active":""} onClick={()=>load("vip")}>VIP</button><button type="button" className={section==="deposits"?"active":""} onClick={()=>load("deposits")}>Deposits</button><button type="button" className={section==="withdrawals"?"active":""} onClick={()=>load("withdrawals")}>Withdraw</button><button type="button" className={section==="settings"?"active":""} onClick={()=>load("settings")}>Settings</button></div>
- {section==="settings"&&<form className="wallet-form admin-settings" onSubmit={save}><div className="settings-title"><Settings/><div><b>App & Payment Settings</b><span>Control money limits, methods and referral commission.</span></div></div>
- <label>Currency</label><div className="two"><input value={cfg.currency} onChange={e=>setCfg({...cfg,currency:e.target.value})} placeholder="AFN"/><input value={cfg.currencySymbol} onChange={e=>setCfg({...cfg,currencySymbol:e.target.value})} placeholder="؋"/></div>
- <label>Deposit limits (AFN)</label><div className="two"><input inputMode="numeric" value={cfg.minDeposit} onChange={e=>setCfg({...cfg,minDeposit:e.target.value})} placeholder="Minimum"/><input inputMode="numeric" value={cfg.maxDeposit} onChange={e=>setCfg({...cfg,maxDeposit:e.target.value})} placeholder="Maximum"/></div>
- <label>Withdrawal limits (AFN)</label><div className="two"><input inputMode="numeric" value={cfg.minWithdraw} onChange={e=>setCfg({...cfg,minWithdraw:e.target.value})} placeholder="Minimum"/><input inputMode="numeric" value={cfg.maxWithdraw} onChange={e=>setCfg({...cfg,maxWithdraw:e.target.value})} placeholder="Maximum"/></div>
- <label>Referral commission %</label><div className="percent-field"><BadgePercent/><input inputMode="decimal" value={cfg.referralPercent} onChange={e=>setCfg({...cfg,referralPercent:e.target.value})} placeholder="5"/></div>
- <label>Announcement</label><input value={cfg.announcement} onChange={e=>setCfg({...cfg,announcement:e.target.value})} placeholder="Dashboard announcement"/>
- <MethodEditor title="Deposit Methods" icon={<Landmark/>} items={cfg.depositMethods} onChange={(v:any[])=>setCfg({...cfg,depositMethods:v})}/>
- <MethodEditor title="Withdrawal Methods" icon={<Smartphone/>} items={cfg.withdrawMethods} onChange={(v:any[])=>setCfg({...cfg,withdrawMethods:v})}/>
- <label>Official Channel 1</label><div className="two"><input value={cfg.channel1Name} onChange={e=>setCfg({...cfg,channel1Name:e.target.value})} placeholder="Channel name"/><input value={cfg.channel1Url} onChange={e=>setCfg({...cfg,channel1Url:e.target.value})} placeholder="https://t.me/channel"/></div>
- <label>Official Channel 2</label><div className="two"><input value={cfg.channel2Name} onChange={e=>setCfg({...cfg,channel2Name:e.target.value})} placeholder="Channel name"/><input value={cfg.channel2Url} onChange={e=>setCfg({...cfg,channel2Url:e.target.value})} placeholder="https://t.me/channel"/></div>
- <button className="gold-button" disabled={busy}>Save All Settings</button></form>}
- {section==="overview"&&<div className="admin-grid"><Stat t="Management" v="Live" h="Firebase connected"/><Stat t="Referral %" v={String(cfg.referralPercent)+"%"} h="VIP commission"/><Stat t="Deposit Min" v={usd(Number(cfg.minDeposit))} h="Admin controlled"/><Stat t="Withdraw Min" v={usd(Number(cfg.minWithdraw))} h="Admin controlled"/><div className="admin-note"><Settings/><b>Control Center Ready</b><span>Manage users, VIP packages, payment methods and manual requests.</span></div></div>}
- {section==="vip"&&<><form className="wallet-form" onSubmit={addPlan}><b>Create VIP / Stake Package</b><input required placeholder="Package name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><div className="two"><input required inputMode="decimal" placeholder="Price AFN" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/><input required inputMode="decimal" placeholder="Daily reward AFN" value={form.daily} onChange={e=>setForm({...form,daily:e.target.value})}/></div><div className="two"><input required inputMode="numeric" placeholder="Days" value={form.days} onChange={e=>setForm({...form,days:e.target.value})}/><input placeholder="Badge" value={form.badge} onChange={e=>setForm({...form,badge:e.target.value})}/></div><button disabled={busy} className="gold-button">Create Package</button></form>{plans.map(x=><div className="admin-row" key={x.id}><Crown/><div><b>{x.name}</b><span>{usd(x.price)} • {usd(x.dailyReward)}/day • {x.durationDays}d</span></div><button type="button" onClick={async()=>{await adminTogglePlan(x.id!,!x.active);load("vip")}}>{x.active?"Disable":"Enable"}</button></div>)}</>}
- {section!=="overview"&&section!=="vip"&&section!=="settings"&&<>{items.map(x=><div className="admin-row" key={x.id}><WalletCards/><div><b>{x.firstName||x.method||("User #"+x.userTelegramId)}</b><span>{x.status||("@"+(x.username||"no_username"))} {x.amount!=null?" • "+usd(x.amount):""}</span>{section==="deposits"&&x.proofUrl&&<a className="proof-link" href={x.proofUrl} target="_blank">View proof</a>}</div>{(section==="deposits"||section==="withdrawals")&&x.status==="pending"?<div className="review"><button type="button" disabled={busy} onClick={()=>review(section,x.id,true)}>✓</button><button type="button" disabled={busy} onClick={()=>review(section,x.id,false)}>×</button></div>:null}</div>)}{!items.length&&<Empty icon={<WalletCards/>} title="Nothing here" text="No records found in this section."/>}</>}</>
+
+function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppState;setState:React.Dispatch<React.SetStateAction<AppState>>;section:AdminSection;setSection:(s:AdminSection)=>void;notify:(s:string)=>void;onBack:()=>void}){
+  const [draft,setDraft]=useState<AppState>(state);
+  const [plan,setPlan]=useState({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"});
+  useEffect(()=>setDraft(state),[state]);
+
+  function saveSettings(){
+    setState({...draft});
+    notify("Frontend settings saved");
+  }
+  function addPlan(e:React.FormEvent){
+    e.preventDefault();
+    const price=Number(plan.price),daily=Number(plan.dailyReward),days=Number(plan.durationDays);
+    if(!plan.name||price<=0||daily<0||days<=0){notify("Complete all package fields");return}
+    const item:Plan={id:uid("plan"),name:plan.name,price,dailyReward:daily,durationDays:days,badge:plan.badge||"VIP",active:true};
+    setDraft(s=>({...s,plans:[item,...s.plans]}));
+    setState(s=>({...s,plans:[item,...s.plans]}));
+    setPlan({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"});
+    notify("Package created");
+  }
+  function togglePlan(id:string){
+    setDraft(s=>({...s,plans:s.plans.map(x=>x.id===id?{...x,active:!x.active}:x)}));
+    setState(s=>({...s,plans:s.plans.map(x=>x.id===id?{...x,active:!x.active}:x)}));
+  }
+  function deletePlan(id:string){
+    setDraft(s=>({...s,plans:s.plans.filter(x=>x.id!==id)}));
+    setState(s=>({...s,plans:s.plans.filter(x=>x.id!==id)}));
+    notify("Package deleted");
+  }
+  function changeMethod(id:string,key:keyof PaymentMethod,value:any){
+    setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.map(x=>x.id===id?{...x,[key]:value}:x)}}));
+  }
+  function addMethod(){
+    setDraft(s=>({...s,settings:{...s.settings,paymentMethods:[...s.settings.paymentMethods,{id:uid("method"),name:"New Method",details:"",active:true,kind:"both"}]}}));
+  }
+  function removeMethod(id:string){
+    setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.filter(x=>x.id!==id)}}));
+  }
+  function reviewRequest(id:string,approve:boolean){
+    setState(s=>{
+      const req=s.requests.find(x=>x.id===id);
+      if(!req)return s;
+      let balance=s.balance;
+      let transactions=s.transactions;
+      if(req.status!=="pending")return s;
+      if(approve&&req.type==="deposit"){
+        balance+=req.amount;
+        transactions=[{id:uid("tx"),type:"deposit",amount:req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
+      }
+      if(!approve&&req.type==="withdraw")balance+=req.amount;
+      if(approve&&req.type==="withdraw")transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
+      return {...s,balance,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
+    });
+    notify(approve?"Request approved":"Request rejected");
+  }
+  function reset(){
+    const next=cloneDefault();
+    setDraft(next);setState(next);notify("Frontend demo reset");
+  }
+
+  return <>
+    <section className="admin-head"><div><small>AFGlion Control Center</small><h1>Admin Panel</h1></div><button type="button" onClick={onBack}><LogOut/> Back</button></section>
+    <section className="admin-tabs">
+      {(["overview","plans","payments","requests","channels","settings"] as AdminSection[]).map(x=><button type="button" className={section===x?"active":""} key={x} onClick={()=>setSection(x)}>{x}</button>)}
+    </section>
+
+    {section==="overview"&&<>
+      <section className="admin-kpis"><Metric title="Balance" value={money(state.balance)} sub="Frontend wallet"/><Metric title="Plans" value={String(state.plans.length)} sub="Configured"/><Metric title="Requests" value={String(state.requests.filter(x=>x.status==="pending").length)} sub="Pending"/><Metric title="Referral" value={state.settings.referralPercent+"%"} sub="Commission"/></section>
+      <section className="admin-hero"><Settings/><div><b>Frontend Control Center</b><span>Every tab and control here works locally. Backend connection is frozen until design approval.</span></div></section>
+      <SectionTitle title="Quick Actions"/>
+      <section className="admin-quick"><button type="button" onClick={()=>setSection("plans")}><Crown/><b>Manage Plans</b></button><button type="button" onClick={()=>setSection("payments")}><WalletCards/><b>Payments</b></button><button type="button" onClick={()=>setSection("requests")}><History/><b>Requests</b></button><button type="button" onClick={()=>setSection("settings")}><Settings/><b>Settings</b></button></section>
+    </>}
+
+    {section==="plans"&&<>
+      <form className="admin-card form-grid" onSubmit={addPlan}>
+        <div className="card-title"><Crown/><div><b>Create Stake Package</b><span>Add a new frontend package.</span></div></div>
+        <input value={plan.name} onChange={e=>setPlan({...plan,name:e.target.value})} placeholder="Package name"/>
+        <div className="two"><input inputMode="decimal" value={plan.price} onChange={e=>setPlan({...plan,price:e.target.value})} placeholder="Price AFN"/><input inputMode="decimal" value={plan.dailyReward} onChange={e=>setPlan({...plan,dailyReward:e.target.value})} placeholder="Daily reward AFN"/></div>
+        <div className="two"><input inputMode="numeric" value={plan.durationDays} onChange={e=>setPlan({...plan,durationDays:e.target.value})} placeholder="Duration days"/><input value={plan.badge} onChange={e=>setPlan({...plan,badge:e.target.value})} placeholder="Badge"/></div>
+        <button className="gold-button" type="submit"><Plus/> Create Package</button>
+      </form>
+      <SectionTitle title="All Packages"/>
+      {draft.plans.map(x=><section className="admin-row" key={x.id}><span className="round-icon"><Crown/></span><div><b>{x.name}</b><small>{money(x.price)} • {money(x.dailyReward)}/day • {x.durationDays}d</small></div><button type="button" className={x.active?"toggle on":"toggle"} onClick={()=>togglePlan(x.id)}>{x.active?"On":"Off"}</button><button className="delete" type="button" onClick={()=>deletePlan(x.id)}><Trash2/></button></section>)}
+    </>}
+
+    {section==="payments"&&<>
+      <section className="admin-card">
+        <div className="card-title"><WalletCards/><div><b>Payment Methods</b><span>Add, edit, enable or disable methods.</span></div><button className="small-add" type="button" onClick={addMethod}><Plus/> Add</button></div>
+        <div className="method-editor">
+          {draft.settings.paymentMethods.map(m=><article key={m.id}>
+            <div className="method-line"><input value={m.name} onChange={e=>changeMethod(m.id,"name",e.target.value)} placeholder="Method name"/><select value={m.kind} onChange={e=>changeMethod(m.id,"kind",e.target.value)}><option value="both">Both</option><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select><button className={m.active?"toggle on":"toggle"} type="button" onClick={()=>changeMethod(m.id,"active",!m.active)}>{m.active?"On":"Off"}</button></div>
+            <div className="method-line"><input value={m.details} onChange={e=>changeMethod(m.id,"details",e.target.value)} placeholder="Number / instructions"/><button className="delete" type="button" onClick={()=>removeMethod(m.id)}><Trash2/></button></div>
+          </article>)}
+        </div>
+        <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save Payment Methods</button>
+      </section>
+    </>}
+
+    {section==="requests"&&<>
+      <SectionTitle title="Pending & Recent Requests"/>
+      {state.requests.map(r=><section className="admin-row" key={r.id}><span className={"request-icon "+r.type}>{r.type==="deposit"?<ArrowDownToLine/>:<ArrowUpFromLine/>}</span><div><b>{r.type} • {r.method}</b><small>{money(r.amount)} • {r.reference||"No reference"} • {r.status}</small></div>{r.status==="pending"&&<div className="review"><button type="button" onClick={()=>reviewRequest(r.id,true)}><Check/></button><button type="button" onClick={()=>reviewRequest(r.id,false)}><X/></button></div>}</section>)}
+      {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here."/>}
+    </>}
+
+    {section==="channels"&&<section className="admin-card form-grid">
+      <div className="card-title"><Radio/><div><b>Official Channels</b><span>Maximum two channels.</span></div></div>
+      {[0,1].map(i=><div className="channel-edit" key={i}><input value={draft.settings.channels[i]?.name||""} onChange={e=>setDraft(s=>{const arr=[...s.settings.channels];arr[i]={name:e.target.value,url:arr[i]?.url||""};return {...s,settings:{...s.settings,channels:arr.filter((x,j)=>j<=1)}}})} placeholder={"Channel "+(i+1)+" name"}/><input value={draft.settings.channels[i]?.url||""} onChange={e=>setDraft(s=>{const arr=[...s.settings.channels];arr[i]={name:arr[i]?.name||"",url:e.target.value};return {...s,settings:{...s.settings,channels:arr.filter((x,j)=>j<=1)}}})} placeholder="https://t.me/channel"/></div>)}
+      <button className="gold-button" type="button" onClick={()=>{setState({...draft,settings:{...draft.settings,channels:draft.settings.channels.filter(x=>x.name&&x.url).slice(0,2)}});notify("Channels saved")}}><Check/> Save Channels</button>
+    </section>}
+
+    {section==="settings"&&<section className="admin-card form-grid">
+      <div className="card-title"><Settings/><div><b>App Settings</b><span>Currency, limits, commission and announcement.</span></div></div>
+      <label>Currency</label><div className="two"><input value={draft.settings.currency} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,currency:e.target.value}}))}/><input value={draft.settings.currencySymbol} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,currencySymbol:e.target.value}}))}/></div>
+      <label>Deposit limits</label><div className="two"><input inputMode="numeric" value={draft.settings.minDeposit} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,minDeposit:Number(e.target.value)}}))}/><input inputMode="numeric" value={draft.settings.maxDeposit} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,maxDeposit:Number(e.target.value)}}))}/></div>
+      <label>Withdrawal limits</label><div className="two"><input inputMode="numeric" value={draft.settings.minWithdraw} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,minWithdraw:Number(e.target.value)}}))}/><input inputMode="numeric" value={draft.settings.maxWithdraw} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,maxWithdraw:Number(e.target.value)}}))}/></div>
+      <label>Referral commission %</label><div className="icon-input"><BadgePercent/><input inputMode="decimal" value={draft.settings.referralPercent} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,referralPercent:Math.max(0,Math.min(100,Number(e.target.value)))}}))}/></div>
+      <label>Announcement</label><textarea value={draft.settings.announcement} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,announcement:e.target.value}}))}/>
+      <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save All Settings</button>
+      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset Frontend Demo</button>
+    </section>}
+  </>
 }
-function MethodEditor({title,icon,items,onChange}:{title:string;icon:React.ReactNode;items:any[];onChange:(v:any[])=>void}){
- const add=()=>onChange([...items,{id:"method-"+Date.now(),name:"New Method",details:"",active:true}]);
- const edit=(i:number,key:string,value:any)=>onChange(items.map((x,j)=>j===i?{...x,[key]:value}:x));
- const remove=(i:number)=>onChange(items.filter((_,j)=>j!==i));
- return <div className="method-editor"><div className="method-editor-head">{icon}<b>{title}</b><button type="button" onClick={add}><Plus/> Add</button></div>{items.map((m,i)=><div className="method-edit-row" key={m.id||i}><div className="method-line"><input value={m.name||""} onChange={e=>edit(i,"name",e.target.value)} placeholder="Method name"/><label className="switch-mini"><input type="checkbox" checked={m.active!==false} onChange={e=>edit(i,"active",e.target.checked)}/><span>{m.active!==false?"On":"Off"}</span></label><button type="button" className="delete-method" onClick={()=>remove(i)}><Trash2/></button></div><input value={m.details||""} onChange={e=>edit(i,"details",e.target.value)} placeholder="Account number / instructions"/></div>)}</div>
+
+function SheetLayer({type,close,state,setState,notify,depositMethods,withdrawMethods,name,username,tgId}:any){
+  if(type==="notifications")return <Modal close={close}><div className="sheet-head"><div><small>AFGLION</small><h3>Notifications</h3></div><button onClick={close}><X/></button></div><section className="notice-list"><div><Bell/><span><b>Welcome to AFGlion</b><small>Your frontend dashboard is ready.</small></span></div><div><ShieldCheck/><span><b>Security</b><small>Backend connection is currently frozen for design approval.</small></span></div></section></Modal>;
+  if(type==="profile")return <Modal close={close}><div className="sheet-head"><div><small>ACCOUNT</small><h3>My Profile</h3></div><button onClick={close}><X/></button></div><section className="profile-card"><span className="profile-avatar"><UserRound/></span><h3>{name}</h3><p>{username?"@"+username:"No username"}</p><div><span>Telegram ID</span><b>{tgId||"Browser preview"}</b></div><div><span>Currency</span><b>{state.settings.currency}</b></div></section></Modal>;
+  return <MoneyForm type={type} close={close} state={state} setState={setState} notify={notify} methods={type==="deposit"?depositMethods:withdrawMethods}/>;
 }
-function Stat({t,v,h}:{t:string;v:string;h:string}){return <div className="stat-card"><span>{t}</span><b>{v}</b><small>{h}</small></div>}
-function Title({t,a,c}:{t:string;a?:string;c?:()=>void}){return <div className="section-title"><h3>{t}</h3>{a&&<button onClick={c}>{a}<ChevronRight/></button>}</div>}
-function Empty({icon,title,text}:{icon:React.ReactNode;title:string;text:string}){return <div className="empty-card">{icon}<b>{title}</b><span>{text}</span></div>}
-function Tx({x}:{x:TransactionDoc}){return <div className="list-row"><WalletCards/><div><b>{x.type.replaceAll("_"," ")}</b><span>{new Date(x.createdAt).toLocaleDateString()} • {x.status}</span></div><strong className={x.amount>=0?"plus":"minus"}>{x.amount>=0?"+":""}{usd(x.amount)}</strong></div>}
+
+function MoneyForm({type,close,state,setState,notify,methods}:any){
+  const [amount,setAmount]=useState("");
+  const [method,setMethod]=useState(methods[0]?.id||"");
+  const [reference,setReference]=useState("");
+  const selected=methods.find((x:PaymentMethod)=>x.id===method);
+  const deposit=type==="deposit";
+  function submit(e:React.FormEvent){
+    e.preventDefault();
+    const value=Number(amount);
+    const min=deposit?state.settings.minDeposit:state.settings.minWithdraw;
+    const max=deposit?state.settings.maxDeposit:state.settings.maxWithdraw;
+    if(!value||value<min||value>max){notify("Amount must be between "+money(min)+" and "+money(max));return}
+    if(!selected){notify("Choose a payment method");return}
+    if(!reference.trim()){notify(deposit?"Enter payment reference":"Enter account / wallet details");return}
+    if(!deposit&&state.balance<value){notify("Insufficient balance");return}
+    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now()};
+    setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,requests:[req,...s.requests]}));
+    notify((deposit?"Deposit":"Withdrawal")+" request created");
+    close();
+  }
+  return <Modal close={close}><form className="money-form" onSubmit={submit}>
+    <div className="sheet-head"><div><small>{deposit?"FUND WALLET":"REQUEST PAYOUT"}</small><h3>{deposit?"New Deposit":"New Withdrawal"}</h3></div><button type="button" onClick={close}><X/></button></div>
+    <section className="amount-box"><span>Amount ({state.settings.currency})</span><div><b>{state.settings.currencySymbol}</b><input autoFocus inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></div><small>Min {money(deposit?state.settings.minDeposit:state.settings.minWithdraw)} • Max {money(deposit?state.settings.maxDeposit:state.settings.maxWithdraw)}</small></section>
+    <label>Payment Method</label><div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
+    {selected&&<section className="method-info"><ShieldCheck/><span>{selected.details||"Admin has not added instructions yet."}</span></section>}
+    <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
+    {deposit&&<section className="upload-placeholder"><Plus/><div><b>Payment proof</b><span>Frontend preview: image upload will connect with backend later.</span></div></section>}
+    <button className="gold-button" type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} Submit {deposit?"Deposit":"Withdrawal"}</button>
+  </form></Modal>
+}
+
+function ConfirmPlan({plan,balance,close,confirm}:{plan:Plan;balance:number;close:()=>void;confirm:()=>void}){
+  return <Modal close={close}><div className="sheet-head"><div><small>CONFIRM</small><h3>Activate {plan.name}</h3></div><button onClick={close}><X/></button></div><section className="confirm-plan"><span className="big-crown"><Crown/></span><h2>{money(plan.price)}</h2><p>{plan.durationDays} days • {money(plan.dailyReward)} admin-configured daily reward</p><div><span>Your balance</span><b>{money(balance)}</b></div></section><button className="gold-button" type="button" onClick={confirm}><Zap/> Confirm Activation</button></Modal>
+}
+
+function Modal({children,close}:{children:React.ReactNode;close:()=>void}){
+  return <motion.div className="modal-backdrop" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onMouseDown={close}><motion.div className="modal-sheet" initial={{y:60,opacity:0}} animate={{y:0,opacity:1}} exit={{y:60,opacity:0}} transition={{type:"spring",damping:24,stiffness:260}} onMouseDown={e=>e.stopPropagation()}>{children}</motion.div></motion.div>
+}
+
+function Nav({active,label,icon,onClick}:{active:boolean;label:string;icon:React.ReactNode;onClick:()=>void}){
+  return <button type="button" className={"nav-item "+(active?"active":"")} onClick={onClick}>{icon}<span>{label}</span>{active&&<motion.i layoutId="nav-dot"/>}</button>
+}
+function Quick({icon,title,sub,onClick}:{icon:React.ReactNode;title:string;sub:string;onClick:()=>void}){
+  return <motion.button whileTap={{scale:.96}} type="button" onClick={onClick}><span>{icon}</span><b>{title}</b><small>{sub}</small></motion.button>
+}
+function Metric({title,value,sub}:{title:string;value:string;sub:string}){
+  return <article className="metric"><span>{title}</span><b>{value}</b><small>{sub}</small></article>
+}
+function SectionTitle({title,action,onClick}:{title:string;action?:string;onClick?:()=>void}){
+  return <div className="section-title"><h3>{title}</h3>{action&&<button type="button" onClick={onClick}>{action}<ChevronRight/></button>}</div>
+}
+function PageHead({eyebrow,title,icon}:{eyebrow:string;title:string;icon:React.ReactNode}){
+  return <section className="page-head"><div><small>{eyebrow}</small><h1>{title}</h1></div><motion.span animate={{rotate:[0,5,-5,0]}} transition={{repeat:Infinity,duration:4}}>{icon}</motion.span></section>
+}
+function TransactionRow({item}:{item:Tx}){
+  return <section className="tx-row"><span className={item.amount>=0?"tx-icon plus":"tx-icon minus"}>{item.amount>=0?<ArrowDownToLine/>:<ArrowUpFromLine/>}</span><div><b>{item.type.replaceAll("_"," ")}</b><small>{new Date(item.createdAt).toLocaleDateString()} • {item.status}{item.note?" • "+item.note:""}</small></div><strong className={item.amount>=0?"positive":"negative"}>{item.amount>=0?"+":""}{money(item.amount)}</strong></section>
+}
+function EmptyState({icon,title,text}:{icon:React.ReactNode;title:string;text:string}){
+  return <section className="empty-state">{icon}<b>{title}</b><span>{text}</span></section>
+}
