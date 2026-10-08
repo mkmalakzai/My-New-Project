@@ -130,6 +130,8 @@ export default function App(){
   },[toast]);
 
   const isAdmin=adminPreview||tgId===state.security.ownerId||state.security.adminIds.includes(tgId);
+  const currentUser=state.users.find(u=>u.telegramId===tgId);
+  const isBanned=!!tgId&&currentUser?.banned===true&&tgId!==state.security.ownerId;
   const activeStake=state.stakes.find(x=>x.status==="active");
   const totalEarned=state.vipEarnings+state.referralEarnings;
   const portfolio=state.balance+totalEarned;
@@ -202,6 +204,7 @@ export default function App(){
   const common={state,setState,notify,openTab,setSheet,name,username,photo,tgId,isAdmin,activeStake,activePlans,depositMethods,withdrawMethods,portfolio,totalEarned,referralLink,copy,openTelegram,activatePlan,claimDemo,setConfirmPlan};
 
   if(!ready)return <main className="loading"><motion.div animate={{scale:[1,1.1,1],rotate:[0,4,-4,0]}} transition={{repeat:Infinity,duration:2}} className="loader-lion">🦁</motion.div><span>Opening AFGlion...</span></main>;
+  if(isBanned)return <main className="loading"><div className="restricted-card"><LockKeyhole/><h2>Account Restricted</h2><p>Your AFGlion account has been banned by an administrator.</p><small>Telegram ID: {tgId}</small></div></main>;
 
   return <main className="app-shell">
     <header className="topbar">
@@ -454,18 +457,23 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
   function reviewRequest(id:string,approve:boolean){
     setState(s=>{
       const req=s.requests.find(x=>x.id===id);
-      if(!req)return s;
+      if(!req||req.status!=="pending")return s;
+      const userId=Number(req.telegramId||0);
       let balance=s.balance;
       let transactions=s.transactions;
-      if(req.status!=="pending")return s;
+      let users=s.users;
       if(approve&&req.type==="deposit"){
-        balance+=req.amount;
+        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
+        if(userId===viewerId)balance+=req.amount;
         transactions=[{id:uid("tx"),type:"deposit",amount:req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
       }
-      if(!approve&&req.type==="withdraw")balance+=req.amount;
-      if(approve&&req.type==="withdraw")transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      const userId=Number(req.telegramId||0);
-      const users=s.users.map(u=>u.telegramId===userId?{...u,balance:approve&&req.type==="deposit"?u.balance+req.amount:(!approve&&req.type==="withdraw"?u.balance+req.amount:u.balance)}:u);
+      if(!approve&&req.type==="withdraw"){
+        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
+        if(userId===viewerId)balance+=req.amount;
+      }
+      if(approve&&req.type==="withdraw"){
+        transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
+      }
       return {...s,balance,users,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
     });
     notify(approve?"Request approved":"Request rejected");
