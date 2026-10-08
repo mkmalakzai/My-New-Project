@@ -1,11 +1,9 @@
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
-const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 
 admin.initializeApp();
 const db = admin.firestore();
-const BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 const DEFAULT_OWNER_ID = 6589090462;
 const money = n => Math.round((Number(n) || 0) * 100) / 100;
 const now = () => Date.now();
@@ -132,9 +130,9 @@ function docData(snap){
   return {id:snap.id,...snap.data()};
 }
 
-exports.authenticateTelegram = onCall({secrets:[BOT_TOKEN]}, async req=>{
+exports.authenticateTelegram = onCall(async req=>{
   await ensureDefaults();
-  const {user,params}=verifyTelegram(req.data?.initData,BOT_TOKEN.value());
+  const {user,params}=verifyTelegram(req.data?.initData,process.env.TELEGRAM_BOT_TOKEN||"");
   const uid=String(user.id), userRef=db.doc("users/"+uid);
   const security=await getSecurity();
   const role=roleFor(user.id,security);
