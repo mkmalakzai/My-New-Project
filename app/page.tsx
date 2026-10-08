@@ -11,23 +11,25 @@ import {
 
 type Tab="home"|"stake"|"referral"|"wallet"|"admin";
 type Sheet="deposit"|"withdraw"|"notifications"|"profile"|null;
-type AdminSection="overview"|"plans"|"payments"|"requests"|"channels"|"settings";
+type AdminSection="overview"|"users"|"plans"|"payments"|"requests"|"channels"|"team"|"settings";
 
 type PaymentMethod={id:string;name:string;number?:string;details:string;active:boolean;kind:"deposit"|"withdraw"|"both"};
 type Plan={id:string;name:string;price:number;dailyReward:number;durationDays:number;badge:string;active:boolean};
 type Stake={id:string;planId:string;planName:string;price:number;dailyReward:number;durationDays:number;startedAt:number;claimed:number;status:"active"|"completed"};
 type Tx={id:string;type:string;amount:number;status:string;createdAt:number;note?:string};
-type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number};
+type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number;proofDataUrl?:string;proofName?:string};
 type ReferralItem={id:string;name:string;joinedAt:number;status:"joined"|"rewarded";reward:number};
 type SettingsDoc={
   currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;
   minWithdraw:number;maxWithdraw:number;referralPercent:number;announcement:string;
   channels:{name:string;url:string}[];paymentMethods:PaymentMethod[];
 };
+type UserRecord={telegramId:number;name:string;username:string;balance:number;vipEarnings:number;referralEarnings:number;joinedAt:number;lastSeen:number;banned:boolean};
+type SecurityDoc={ownerId:number;adminIds:number[]};
 type AppState={
   balance:number;vipEarnings:number;referralEarnings:number;
   plans:Plan[];stakes:Stake[];transactions:Tx[];requests:RequestItem[];
-  referrals:ReferralItem[];settings:SettingsDoc;
+  referrals:ReferralItem[];users:UserRecord[];security:SecurityDoc;settings:SettingsDoc;
 };
 
 const OWNER_ID=6589090462;
@@ -46,6 +48,8 @@ const defaultState:AppState={
   transactions:[],
   requests:[],
   referrals:[],
+  users:[{telegramId:OWNER_ID,name:"AFGlion Owner",username:"",balance:0,vipEarnings:0,referralEarnings:0,joinedAt:Date.now(),lastSeen:Date.now(),banned:false}],
+  security:{ownerId:OWNER_ID,adminIds:[]},
   settings:{
     currency:"AFN",currencySymbol:"؋",
     minDeposit:100,maxDeposit:100000,
@@ -108,12 +112,24 @@ export default function App(){
   },[state,ready]);
 
   useEffect(()=>{
+    if(!ready||!tgId)return;
+    setState(s=>{
+      const found=s.users.find(x=>x.telegramId===tgId);
+      if(found){
+        return {...s,users:s.users.map(x=>x.telegramId===tgId?{...x,name,username,lastSeen:now(),balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings}:x)};
+      }
+      const user:UserRecord={telegramId:tgId,name,username,balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings,joinedAt:now(),lastSeen:now(),banned:false};
+      return {...s,users:[user,...s.users]};
+    });
+  },[ready,tgId,name,username]);
+
+  useEffect(()=>{
     if(!toast)return;
     const t=setTimeout(()=>setToast(""),2600);
     return()=>clearTimeout(t);
   },[toast]);
 
-  const isAdmin=tgId===OWNER_ID||adminPreview;
+  const isAdmin=adminPreview||tgId===state.security.ownerId||state.security.adminIds.includes(tgId);
   const activeStake=state.stakes.find(x=>x.status==="active");
   const totalEarned=state.vipEarnings+state.referralEarnings;
   const portfolio=state.balance+totalEarned;
@@ -130,9 +146,22 @@ export default function App(){
   function copy(text:string){
     navigator.clipboard?.writeText(text).then(()=>notify("Copied to clipboard")).catch(()=>notify("Copy failed"));
   }
+  function normalizeTelegramUrl(url:string){
+    let u=String(url||"").trim();
+    if(!u)return "";
+    if(u.startsWith("@"))u="https://t.me/"+u.slice(1);
+    else if(u.startsWith("t.me/")||u.startsWith("telegram.me/"))u="https://"+u;
+    return u;
+  }
   function openTelegram(url:string){
+    const u=normalizeTelegramUrl(url);
+    if(!u){notify("Channel link is missing");return}
     const w=(window as any).Telegram?.WebApp;
-    if(w?.openTelegramLink)w.openTelegramLink(url); else window.open(url,"_blank");
+    try{
+      if(w?.openTelegramLink&&u.includes("t.me/")){w.openTelegramLink(u);return}
+      const opened=window.open(u,"_blank","noopener,noreferrer");
+      if(!opened)window.location.assign(u);
+    }catch{window.location.assign(u)}
   }
   function referralLink(){
     const id=tgId||6589090462;
@@ -148,6 +177,7 @@ export default function App(){
     updateState(s=>({
       ...s,
       balance:s.balance-plan.price,
+      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance-plan.price}:u),
       stakes:[{id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"},...s.stakes],
       transactions:[{id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name},...s.transactions]
     }));
@@ -162,6 +192,7 @@ export default function App(){
       ...s,
       balance:s.balance+available,
       vipEarnings:s.vipEarnings+available,
+      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance+available,vipEarnings:s.vipEarnings+available}:u),
       stakes:s.stakes.map(x=>x.id===stake.id?{...x,claimed:x.claimed+available}:x),
       transactions:[{id:uid("tx"),type:"vip_reward",amount:available,status:"completed",createdAt:now(),note:stake.planName},...s.transactions]
     }));
@@ -191,7 +222,7 @@ export default function App(){
         {tab==="stake"&&<StakeView {...common}/>}
         {tab==="referral"&&<ReferralView {...common}/>}
         {tab==="wallet"&&<WalletView {...common}/>}
-        {tab==="admin"&&isAdmin&&<AdminView state={state} setState={setState} section={adminSection} setSection={setAdminSection} notify={notify} onBack={()=>openTab("home")}/>}
+        {tab==="admin"&&isAdmin&&<AdminView state={state} setState={setState} section={adminSection} setSection={setAdminSection} notify={notify} onBack={()=>openTab("home")} viewerId={tgId||state.security.ownerId}/>}
         {tab==="admin"&&!isAdmin&&<EmptyState icon={<LockKeyhole/>} title="Admin access only" text="Open AFGlion with the owner Telegram account."/>}
       </motion.section>
     </AnimatePresence>
@@ -259,7 +290,7 @@ function HomeView(p:any){
     <button className="referral-banner" type="button" onClick={()=>p.openTab("referral")}><span className="round-icon green"><Users/></span><div><small>GROW TOGETHER</small><b>Invite friends. Earn rewards.</b><span>{s.settings.referralPercent}% commission is currently configured.</span></div><ChevronRight/></button>
 
     <SectionTitle title="AFGlion Community"/>
-    {s.settings.channels.length?<section className="channel-grid">{s.settings.channels.map((ch:any)=><button type="button" key={ch.url} onClick={()=>p.openTelegram(ch.url)}><Radio/><div><b>{ch.name}</b><span>Official community</span></div><ChevronRight/></button>)}</section>:<section className="empty-inline"><Radio/><div><b>Official channels</b><span>Admin can add up to two channels from the control panel.</span></div></section>}
+    {s.settings.channels.length?<section className="channel-join-list">{s.settings.channels.map((ch:any,i:number)=><article className="channel-join-card" key={ch.url||i}><span className="channel-logo"><Radio/></span><div><small>OFFICIAL CHANNEL</small><b>{ch.name}</b><span>News, updates and AFGlion announcements.</span></div><button type="button" onClick={()=>p.openTelegram(ch.url)}>Join <ChevronRight/></button></article>)}</section>:<section className="empty-inline"><Radio/><div><b>Official channels</b><span>Admin can add up to two channels from the control panel.</span></div></section>}
 
     <SectionTitle title="Account Center"/>
     <section className="account-grid">
@@ -377,9 +408,15 @@ function WalletView(p:any){
   </>
 }
 
-function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppState;setState:React.Dispatch<React.SetStateAction<AppState>>;section:AdminSection;setSection:(s:AdminSection)=>void;notify:(s:string)=>void;onBack:()=>void}){
+function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{state:AppState;setState:React.Dispatch<React.SetStateAction<AppState>>;section:AdminSection;setSection:(s:AdminSection)=>void;notify:(s:string)=>void;onBack:()=>void;viewerId:number}){
   const [draft,setDraft]=useState<AppState>(state);
   const [plan,setPlan]=useState({name:"",price:"",dailyReward:"",durationDays:"",badge:"VIP"});
+  const [userSearch,setUserSearch]=useState("");
+  const [balanceEdits,setBalanceEdits]=useState<Record<number,string>>({});
+  const [newAdminId,setNewAdminId]=useState("");
+  const [transferId,setTransferId]=useState("");
+  const [proofView,setProofView]=useState("");
+  const isOwner=viewerId===state.security.ownerId;
   useEffect(()=>setDraft(state),[state]);
 
   function saveSettings(){
@@ -427,26 +464,73 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
       }
       if(!approve&&req.type==="withdraw")balance+=req.amount;
       if(approve&&req.type==="withdraw")transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      return {...s,balance,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
+      const userId=Number(req.telegramId||0);
+      const users=s.users.map(u=>u.telegramId===userId?{...u,balance:approve&&req.type==="deposit"?u.balance+req.amount:(!approve&&req.type==="withdraw"?u.balance+req.amount:u.balance)}:u);
+      return {...s,balance,users,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
     });
     notify(approve?"Request approved":"Request rejected");
   }
+  function adjustUserBalance(id:number,mode:"add"|"remove"){
+    const amount=Number(balanceEdits[id]||0);
+    if(!amount||amount<=0){notify("Enter a valid amount");return}
+    setState(s=>{
+      const target=s.users.find(u=>u.telegramId===id); if(!target)return s;
+      const next=mode==="add"?target.balance+amount:Math.max(0,target.balance-amount);
+      return {...s,balance:id===viewerId?next:s.balance,users:s.users.map(u=>u.telegramId===id?{...u,balance:next}:u)};
+    });
+    setBalanceEdits(v=>({...v,[id]:""}));
+    notify(mode==="add"?"Balance added":"Balance removed");
+  }
+  function toggleBan(id:number){
+    if(id===state.security.ownerId){notify("Owner cannot be banned");return}
+    setState(s=>({...s,users:s.users.map(u=>u.telegramId===id?{...u,banned:!u.banned}:u)}));
+  }
+  function addAdmin(){
+    if(!isOwner){notify("Only the owner can manage admins");return}
+    const id=Number(newAdminId); if(!id){notify("Enter a valid Telegram ID");return}
+    if(id===state.security.ownerId){notify("This user is already the owner");return}
+    setState(s=>({...s,security:{...s.security,adminIds:Array.from(new Set([...s.security.adminIds,id]))},users:s.users.some(u=>u.telegramId===id)?s.users:[{telegramId:id,name:"Admin User",username:"",balance:0,vipEarnings:0,referralEarnings:0,joinedAt:now(),lastSeen:now(),banned:false},...s.users]}));
+    setNewAdminId("");notify("Admin added");
+  }
+  function removeAdmin(id:number){
+    if(!isOwner){notify("Only the owner can manage admins");return}
+    setState(s=>({...s,security:{...s.security,adminIds:s.security.adminIds.filter(x=>x!==id)}}));notify("Admin removed");
+  }
+  function transferOwnership(){
+    if(!isOwner){notify("Only the owner can transfer ownership");return}
+    const id=Number(transferId); if(!id||id===state.security.ownerId){notify("Enter a different valid Telegram ID");return}
+    const oldOwner=state.security.ownerId;
+    setState(s=>({...s,security:{ownerId:id,adminIds:Array.from(new Set([...s.security.adminIds.filter(x=>x!==id),oldOwner]))},users:s.users.some(u=>u.telegramId===id)?s.users:[{telegramId:id,name:"New Owner",username:"",balance:0,vipEarnings:0,referralEarnings:0,joinedAt:now(),lastSeen:now(),banned:false},...s.users]}));
+    setTransferId("");notify("Ownership transferred");
+  }
   function reset(){
     const next=cloneDefault();
-    setDraft(next);setState(next);notify("Frontend demo reset");
+    setDraft(next);setState(next);notify("AFGlion data reset");
   }
 
   return <>
     <section className="admin-head"><div><small>AFGlion Control Center</small><h1>Admin Panel</h1></div><button type="button" onClick={onBack}><LogOut/> Back</button></section>
     <section className="admin-tabs">
-      {(["overview","plans","payments","requests","channels","settings"] as AdminSection[]).map(x=><button type="button" className={section===x?"active":""} key={x} onClick={()=>setSection(x)}>{x}</button>)}
+      {(["overview","users","plans","payments","requests","channels","team","settings"] as AdminSection[]).map(x=><button type="button" className={section===x?"active":""} key={x} onClick={()=>setSection(x)}>{x}</button>)}
     </section>
 
     {section==="overview"&&<>
-      <section className="admin-kpis"><Metric title="Balance" value={money(state.balance)} sub="Frontend wallet"/><Metric title="Plans" value={String(state.plans.length)} sub="Configured"/><Metric title="Requests" value={String(state.requests.filter(x=>x.status==="pending").length)} sub="Pending"/><Metric title="Referral" value={state.settings.referralPercent+"%"} sub="Commission"/></section>
+      <section className="admin-kpis"><Metric title="Users" value={String(state.users.length)} sub="Registered"/><Metric title="Plans" value={String(state.plans.length)} sub="Configured"/><Metric title="Requests" value={String(state.requests.filter(x=>x.status==="pending").length)} sub="Pending"/><Metric title="Referral" value={state.settings.referralPercent+"%"} sub="Commission"/></section>
       <section className="admin-hero"><Settings/><div><b>AFGlion Control Center</b><span>Manage packages, payment methods, requests, channels and app settings from one place.</span></div></section>
       <SectionTitle title="Quick Actions"/>
-      <section className="admin-quick"><button type="button" onClick={()=>setSection("plans")}><Crown/><b>Manage Plans</b></button><button type="button" onClick={()=>setSection("payments")}><WalletCards/><b>Payments</b></button><button type="button" onClick={()=>setSection("requests")}><History/><b>Requests</b></button><button type="button" onClick={()=>setSection("settings")}><Settings/><b>Settings</b></button></section>
+      <section className="admin-quick"><button type="button" onClick={()=>setSection("users")}><Users/><b>Users</b></button><button type="button" onClick={()=>setSection("plans")}><Crown/><b>Plans</b></button><button type="button" onClick={()=>setSection("requests")}><History/><b>Requests</b></button><button type="button" onClick={()=>setSection("team")}><ShieldCheck/><b>Admin Team</b></button></section>
+    </>}
+
+    {section==="users"&&<>
+      <section className="user-toolbar"><div><Users/><span><b>User Management</b><small>{state.users.length} registered users</small></span></div><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} placeholder="Search name, username or Telegram ID"/></section>
+      <section className="user-list">
+        {state.users.filter(u=>{const q=userSearch.trim().toLowerCase();return !q||u.name.toLowerCase().includes(q)||u.username.toLowerCase().includes(q)||String(u.telegramId).includes(q)}).map(u=><article className="user-card" key={u.telegramId}>
+          <div className="user-card-head"><span className="user-avatar"><UserRound/></span><div><b>{u.name}</b><small>{u.username?"@"+u.username:"No username"} • ID {u.telegramId}</small></div><span className={"user-state "+(u.banned?"banned":"active")}>{u.banned?"Banned":"Active"}</span></div>
+          <div className="user-facts"><div><span>Balance</span><b>{money(u.balance)}</b></div><div><span>VIP Earned</span><b>{money(u.vipEarnings)}</b></div><div><span>Referral</span><b>{money(u.referralEarnings)}</b></div><div><span>Role</span><b>{u.telegramId===state.security.ownerId?"Owner":state.security.adminIds.includes(u.telegramId)?"Admin":"User"}</b></div><div><span>Joined</span><b>{new Date(u.joinedAt).toLocaleDateString()}</b></div><div><span>Last Seen</span><b>{new Date(u.lastSeen).toLocaleString()}</b></div></div>
+          <div className="balance-control"><input inputMode="decimal" value={balanceEdits[u.telegramId]||""} onChange={e=>setBalanceEdits(v=>({...v,[u.telegramId]:e.target.value}))} placeholder="Amount AFN"/><button type="button" className="add-balance" onClick={()=>adjustUserBalance(u.telegramId,"add")}><Plus/> Add</button><button type="button" className="remove-balance" onClick={()=>adjustUserBalance(u.telegramId,"remove")}><Trash2/> Remove</button></div>
+          <button type="button" className={u.banned?"unban-button":"ban-button"} disabled={u.telegramId===state.security.ownerId} onClick={()=>toggleBan(u.telegramId)}>{u.banned?<><ShieldCheck/> Unban User</>:<><LockKeyhole/> Ban User</>}</button>
+        </article>)}
+      </section>
     </>}
 
     {section==="plans"&&<>
@@ -487,6 +571,7 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
           <div><span>Request ID</span><b className="mono">{r.id}</b></div>
           <div><span>Date & Time</span><b>{new Date(r.createdAt).toLocaleString()}</b></div>
         </div>
+        {r.type==="deposit"&&<div className="proof-admin">{r.proofDataUrl?<button type="button" onClick={()=>setProofView(r.proofDataUrl||"")}><img src={r.proofDataUrl} alt="Payment proof"/><span><b>Payment Proof</b><small>{r.proofName||"Uploaded image"} • Tap to view</small></span><ChevronRight/></button>:<div className="proof-missing"><X/><span><b>No proof attached</b><small>Older request or missing image</small></span></div>}</div>}
         {r.status==="pending"?<div className="request-actions"><button type="button" className="approve" onClick={()=>reviewRequest(r.id,true)}><Check/> Approve</button><button type="button" className="reject" onClick={()=>reviewRequest(r.id,false)}><X/> Reject</button></div>:<div className="processed-note"><ShieldCheck/> Request processed: {r.status}</div>}
       </article>)}
       {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here with full details."/>}
@@ -498,6 +583,16 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
       <button className="gold-button" type="button" onClick={()=>{setState({...draft,settings:{...draft.settings,channels:draft.settings.channels.filter(x=>x.name&&x.url).slice(0,2)}});notify("Channels saved")}}><Check/> Save Channels</button>
     </section>}
 
+    {section==="team"&&<>
+      <section className="owner-card"><span className="owner-crown"><Crown/></span><div><small>CURRENT OWNER</small><b>Telegram ID: {state.security.ownerId}</b><span>Full access to ownership, admins and all AFGlion controls.</span></div></section>
+      <section className="admin-card form-grid">
+        <div className="card-title"><ShieldCheck/><div><b>Admin Team</b><span>Add or remove admins. Only the owner can make changes.</span></div></div>
+        <div className="team-add"><input inputMode="numeric" value={newAdminId} onChange={e=>setNewAdminId(e.target.value)} placeholder="Telegram ID"/><button type="button" onClick={addAdmin}><Plus/> Add Admin</button></div>
+        <div className="team-list">{state.security.adminIds.map(id=><div className="team-row" key={id}><span><UserRound/></span><div><b>{state.users.find(u=>u.telegramId===id)?.name||"Admin User"}</b><small>Telegram ID: {id}</small></div><button type="button" disabled={!isOwner} onClick={()=>removeAdmin(id)}><Trash2/> Remove</button></div>)}{!state.security.adminIds.length&&<div className="team-empty">No additional admins yet.</div>}</div>
+      </section>
+      <section className="transfer-card"><div className="card-title"><Crown/><div><b>Transfer Ownership</b><span>The new owner receives full control. Your current owner account becomes an admin.</span></div></div><input inputMode="numeric" value={transferId} onChange={e=>setTransferId(e.target.value)} placeholder="New owner Telegram ID"/><button type="button" disabled={!isOwner} onClick={transferOwnership}><ShieldCheck/> Transfer Ownership</button></section>
+    </>}
+
     {section==="settings"&&<section className="admin-card form-grid">
       <div className="card-title"><Settings/><div><b>App Settings</b><span>Currency, limits, commission and announcement.</span></div></div>
       <label>Currency</label><div className="two"><input value={draft.settings.currency} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,currency:e.target.value}}))}/><input value={draft.settings.currencySymbol} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,currencySymbol:e.target.value}}))}/></div>
@@ -508,6 +603,7 @@ function AdminView({state,setState,section,setSection,notify,onBack}:{state:AppS
       <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save All Settings</button>
       <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset Frontend Demo</button>
     </section>}
+    {proofView&&<motion.div className="proof-viewer" initial={{opacity:0}} animate={{opacity:1}} onClick={()=>setProofView("")}><div onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setProofView("")}><X/></button><img src={proofView} alt="Payment proof full view"/></div></motion.div>}
   </>
 }
 
@@ -521,6 +617,8 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
   const [amount,setAmount]=useState("");
   const [method,setMethod]=useState(methods[0]?.id||"");
   const [reference,setReference]=useState("");
+  const [proofDataUrl,setProofDataUrl]=useState("");
+  const [proofName,setProofName]=useState("");
   const selected=methods.find((x:PaymentMethod)=>x.id===method);
   const deposit=type==="deposit";
   function submit(e:React.FormEvent){
@@ -531,9 +629,10 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
     if(!value||value<min||value>max){notify("Amount must be between "+money(min)+" and "+money(max));return}
     if(!selected){notify("Choose a payment method");return}
     if(!reference.trim()){notify(deposit?"Enter payment reference":"Enter account / wallet details");return}
+    if(deposit&&!proofDataUrl){notify("Payment proof image is required");return}
     if(!deposit&&state.balance<value){notify("Insufficient balance");return}
-    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0)};
-    setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,requests:[req,...s.requests]}));
+    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0),proofDataUrl:deposit?proofDataUrl:undefined,proofName:deposit?proofName:undefined};
+    setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,users:s.users.map(u=>u.telegramId===Number(tgId||0)?{...u,balance:deposit?u.balance:Math.max(0,u.balance-value)}:u),requests:[req,...s.requests]}));
     notify((deposit?"Deposit":"Withdrawal")+" request created");
     close();
   }
@@ -543,7 +642,7 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
     <label>Payment Method</label><div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
     {selected&&<><section className="payment-number-card"><small>{selected.name} ACCOUNT / NUMBER</small><div><b>{selected.number||"Not configured"}</b><button type="button" disabled={!selected.number} onClick={()=>{if(selected.number){navigator.clipboard?.writeText(selected.number);notify("Payment number copied")}}}><Copy/> Copy</button></div></section><section className="method-info"><ShieldCheck/><span>{selected.details||"Follow the payment instructions shown above."}</span></section></>}
     <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
-    {deposit&&<section className="upload-placeholder"><Plus/><div><b>Payment proof</b><span>Keep your payment screenshot/reference ready for verification.</span></div></section>}
+    {deposit&&<label className="proof-upload"><input type="file" accept="image/*" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith("image/")){notify("Please choose an image");return}if(file.size>1500000){notify("Proof image must be under 1.5 MB");return}const reader=new FileReader();reader.onload=()=>{setProofDataUrl(String(reader.result||""));setProofName(file.name)};reader.readAsDataURL(file)}}/><span className="proof-upload-icon">{proofDataUrl?<Check/>:<Plus/>}</span><div><b>{proofDataUrl?"Proof attached":"Upload payment proof *"}</b><span>{proofName||"JPG, PNG or WEBP • max 1.5 MB"}</span></div>{proofDataUrl&&<img src={proofDataUrl} alt="Proof preview"/>}</label>}
     <button className="gold-button" type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} Submit {deposit?"Deposit":"Withdrawal"}</button>
   </form></Modal>
 }
