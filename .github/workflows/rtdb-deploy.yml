@@ -1,7 +1,7 @@
 name: AFGlion RTDB Deploy
 on:
   push:
-    branches: [afglion-rtdb-fix]
+    branches: [main]
     paths:
       - "database.rules.json"
       - "scripts/rtdb-seed.json"
