@@ -60,8 +60,8 @@ jobs:
         working-directory: functions
         run: npm install
 
-      - name: Test backend and Firestore deployment without Storage
-        run: firebase deploy --only functions,firestore:rules --project "$PROJECT_ID" --non-interactive
+      - name: Test Cloud Functions deployment
+        run: firebase deploy --only functions --project "$PROJECT_ID" --non-interactive
 
       - name: Remove temporary function environment
         if: always()
