@@ -276,13 +276,13 @@ export default function App(){
       setSheet("deposit");
       return;
     }
-    updateState(s=>({
-      ...s,
-      balance:s.balance-plan.price,
-      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance-plan.price}:u),
-      stakes:[{id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"},...s.stakes],
-      transactions:[{id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name},...s.transactions]
-    }));
+    const nextBalance=state.balance-plan.price;
+    const stake:Stake={id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"};
+    const tx:Tx={id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name};
+    const nextStakes=[stake,...state.stakes];
+    const nextTx=[tx,...state.transactions];
+    setState(s=>({...s,balance:nextBalance,stakes:nextStakes,transactions:nextTx,users:s.users.map(u=>u.telegramId===tgId?{...u,balance:nextBalance}:u)}));
+    if(tgId)await saveRemoteUser(tgId,{balance:nextBalance,stakes:nextStakes,transactions:nextTx}).catch(()=>{});
     if(referredBy&&referredBy!==tgId){
       const reward=Math.round((plan.price*Number(state.settings.referralPercent||0)/100)*100)/100;
       if(reward>0)await rewardReferral(referredBy,tgId,reward).catch(()=>{});
@@ -290,18 +290,16 @@ export default function App(){
     setConfirmPlan(null);
     notify(plan.name+" activated");
   }
-  function claimDemo(stake:Stake){
+  async function claimDemo(stake:Stake){
     const elapsed=Math.floor((now()-stake.startedAt)/86400000);
     const available=Math.max(0,elapsed*stake.dailyReward-stake.claimed);
     if(available<=0){notify("No reward available yet");return}
-    updateState(s=>({
-      ...s,
-      balance:s.balance+available,
-      vipEarnings:s.vipEarnings+available,
-      users:s.users.map(u=>u.telegramId===tgId?{...u,balance:s.balance+available,vipEarnings:s.vipEarnings+available}:u),
-      stakes:s.stakes.map(x=>x.id===stake.id?{...x,claimed:x.claimed+available}:x),
-      transactions:[{id:uid("tx"),type:"vip_reward",amount:available,status:"completed",createdAt:now(),note:stake.planName},...s.transactions]
-    }));
+    const nextBalance=state.balance+available;
+    const nextProfit=state.vipEarnings+available;
+    const nextStakes=state.stakes.map(x=>x.id===stake.id?{...x,claimed:x.claimed+available}:x);
+    const nextTx:Tx[]=[{id:uid("tx"),type:"vip_reward",amount:available,status:"completed",createdAt:now(),note:stake.planName},...state.transactions];
+    setState(s=>({...s,balance:nextBalance,vipEarnings:nextProfit,stakes:nextStakes,transactions:nextTx,users:s.users.map(u=>u.telegramId===tgId?{...u,balance:nextBalance,vipEarnings:nextProfit}:u)}));
+    if(tgId)await saveRemoteUser(tgId,{balance:nextBalance,vipEarnings:nextProfit,stakes:nextStakes,transactions:nextTx}).catch(()=>{});
     notify(money(available)+" claimed");
   }
 
