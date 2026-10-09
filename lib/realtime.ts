@@ -151,3 +151,10 @@ export async function updateRemoteUserBalance(id:number,balance:number){
 export async function updateRemoteUserBan(id:number,banned:boolean){
   await update(ref(rtdb,"users/"+id),{banned});
 }
+
+export async function updateRemoteRequest(userId:number,requestId:string,patch:any){
+  await runTransaction(ref(rtdb,"users/"+userId+"/requests"),current=>{
+    const list=arr(current);
+    return list.map((r:any)=>String(r?.id)===String(requestId)?{...r,...patch}:r);
+  });
+}
