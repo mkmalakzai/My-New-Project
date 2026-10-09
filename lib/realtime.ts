@@ -158,3 +158,29 @@ export async function updateRemoteRequest(userId:number,requestId:string,patch:a
     return list.map((r:any)=>String(r?.id)===String(requestId)?{...r,...patch}:r);
   });
 }
+
+export async function reviewRemoteRequest(userId:number,requestId:string,approve:boolean){
+  await runTransaction(ref(rtdb,"users/"+userId),current=>{
+    if(!current)return current;
+    const requests=arr(current.requests);
+    const request=requests.find((r:any)=>String(r?.id)===String(requestId));
+    if(!request||request.status!=="pending")return current;
+    let balance=Number(current.balance||0);
+    const transactions=arr(current.transactions);
+    if(approve&&request.type==="deposit"){
+      balance+=Number(request.amount||0);
+      transactions.unshift({id:"tx-"+Date.now(),type:"deposit",amount:Number(request.amount||0),status:"completed",createdAt:Date.now(),note:request.method||""});
+    }else if(!approve&&request.type==="withdraw"){
+      balance+=Number(request.amount||0);
+      transactions.unshift({id:"tx-"+Date.now(),type:"withdrawal_refund",amount:Number(request.amount||0),status:"refunded",createdAt:Date.now(),note:request.method||""});
+    }else if(approve&&request.type==="withdraw"){
+      transactions.unshift({id:"tx-"+Date.now(),type:"withdrawal",amount:-Number(request.amount||0),status:"completed",createdAt:Date.now(),note:request.method||""});
+    }
+    return {
+      ...current,
+      balance:Math.round(balance*100)/100,
+      transactions,
+      requests:requests.map((r:any)=>String(r?.id)===String(requestId)?{...r,status:approve?"approved":"rejected",reviewedAt:Date.now()}:r)
+    };
+  });
+}
