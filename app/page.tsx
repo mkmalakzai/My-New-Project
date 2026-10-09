@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useState} from "react";
 import {AnimatePresence,motion} from "framer-motion";
 import {
   ArrowDownToLine,ArrowUpFromLine,BadgePercent,Bell,Check,ChevronRight,Copy,
@@ -8,6 +8,11 @@ import {
   Settings,ShieldCheck,Smartphone,Sparkles,Trash2,TrendingUp,UserRound,
   Users,WalletCards,X,Zap
 } from "lucide-react";
+import {
+  ensureRemoteUser,saveRemoteUser,watchRemoteUser,watchGlobal,watchAllUsers,watchReferrals,
+  saveGlobalSettings,saveGlobalPlans,saveSecurity,rewardReferral,
+  updateRemoteUserBalance,updateRemoteUserBan,updateRemoteRequest
+} from "@/lib/realtime";
 
 type Tab="home"|"stake"|"referral"|"wallet"|"admin";
 type Sheet="deposit"|"withdraw"|"notifications"|"profile"|null;
@@ -33,7 +38,6 @@ type AppState={
 };
 
 const OWNER_ID=6589090462;
-const STORE_KEY="afglion_frontend_v4";
 
 const defaultState:AppState={
   balance:0,
