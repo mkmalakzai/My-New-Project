@@ -41,12 +41,12 @@ export function normalizeUser(v:any,id:number):RemoteUser{
 
 export async function ensureRemoteUser(input:{telegramId:number;name:string;username:string;photo?:string;referredBy?:number|null}){
   const userRef=ref(rtdb,"users/"+input.telegramId);
-  let created=false;
+  const before=await get(userRef);
+  const created=!before.exists();
   const result=await runTransaction(userRef,current=>{
     if(current){
       return {...current,name:input.name,username:input.username,photo:input.photo||current.photo||"",lastSeen:Date.now()};
     }
-    created=true;
     return {
       telegramId:input.telegramId,name:input.name,username:input.username,photo:input.photo||"",
       balance:0,vipEarnings:0,referralEarnings:0,joinedAt:Date.now(),lastSeen:Date.now(),
