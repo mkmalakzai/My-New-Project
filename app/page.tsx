@@ -17,11 +17,11 @@ type PaymentMethod={id:string;name:string;number?:string;details:string;active:b
 type Plan={id:string;name:string;price:number;dailyReward:number;durationDays:number;badge:string;active:boolean};
 type Stake={id:string;planId:string;planName:string;price:number;dailyReward:number;durationDays:number;startedAt:number;claimed:number;status:"active"|"completed"};
 type Tx={id:string;type:string;amount:number;status:string;createdAt:number;note?:string};
-type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number;proofDataUrl?:string;proofName?:string};
+type RequestItem={id:string;type:"deposit"|"withdraw";amount:number;method:string;reference:string;status:"pending"|"approved"|"rejected";createdAt:number;userName?:string;username?:string;telegramId?:number};
 type ReferralItem={id:string;name:string;joinedAt:number;status:"joined"|"rewarded";reward:number};
 type SettingsDoc={
   currency:string;currencySymbol:string;minDeposit:number;maxDeposit:number;
-  minWithdraw:number;maxWithdraw:number;referralPercent:number;announcement:string;
+  minWithdraw:number;maxWithdraw:number;referralPercent:number;announcement:string;supportUsername:string;
   channels:{name:string;url:string}[];paymentMethods:PaymentMethod[];
 };
 type UserRecord={telegramId:number;name:string;username:string;balance:number;vipEarnings:number;referralEarnings:number;joinedAt:number;lastSeen:number;banned:boolean};
@@ -56,6 +56,7 @@ const defaultState:AppState={
     minWithdraw:100,maxWithdraw:50000,
     referralPercent:5,
     announcement:"Welcome to AFGlion — your premium finance dashboard.",
+    supportUsername:"",
     channels:[],
     paymentMethods:[
       {id:"hesab-pay",name:"HESAB PAY",number:"",details:"Add payment instructions here.",active:true,kind:"both"},
@@ -418,13 +419,12 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
   const [balanceEdits,setBalanceEdits]=useState<Record<number,string>>({});
   const [newAdminId,setNewAdminId]=useState("");
   const [transferId,setTransferId]=useState("");
-  const [proofView,setProofView]=useState("");
   const isOwner=viewerId===state.security.ownerId;
   useEffect(()=>setDraft(state),[state]);
 
   function saveSettings(){
     setState({...draft});
-    notify("Frontend settings saved");
+    notify("Settings saved");
   }
   function addPlan(e:React.FormEvent){
     e.preventDefault();
@@ -579,7 +579,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
           <div><span>Request ID</span><b className="mono">{r.id}</b></div>
           <div><span>Date & Time</span><b>{new Date(r.createdAt).toLocaleString()}</b></div>
         </div>
-        {r.type==="deposit"&&<div className="proof-admin">{r.proofDataUrl?<button type="button" onClick={()=>setProofView(r.proofDataUrl||"")}><img src={r.proofDataUrl} alt="Payment proof"/><span><b>Payment Proof</b><small>{r.proofName||"Uploaded image"} • Tap to view</small></span><ChevronRight/></button>:<div className="proof-missing"><X/><span><b>No proof attached</b><small>Older request or missing image</small></span></div>}</div>}
+        {r.type==="deposit"&&<div className="telegram-proof-note"><Radio/><div><b>Screenshot verification</b><span>Check the admin Telegram chat for this user’s payment screenshot. Match it with the Request ID and TXID above.</span></div></div>}
         {r.status==="pending"?<div className="request-actions"><button type="button" className="approve" onClick={()=>reviewRequest(r.id,true)}><Check/> Approve</button><button type="button" className="reject" onClick={()=>reviewRequest(r.id,false)}><X/> Reject</button></div>:<div className="processed-note"><ShieldCheck/> Request processed: {r.status}</div>}
       </article>)}
       {!state.requests.length&&<EmptyState icon={<History/>} title="No requests" text="User deposit and withdrawal requests will appear here with full details."/>}
@@ -607,11 +607,11 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
       <label>Deposit limits</label><div className="two"><input inputMode="numeric" value={draft.settings.minDeposit} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,minDeposit:Number(e.target.value)}}))}/><input inputMode="numeric" value={draft.settings.maxDeposit} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,maxDeposit:Number(e.target.value)}}))}/></div>
       <label>Withdrawal limits</label><div className="two"><input inputMode="numeric" value={draft.settings.minWithdraw} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,minWithdraw:Number(e.target.value)}}))}/><input inputMode="numeric" value={draft.settings.maxWithdraw} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,maxWithdraw:Number(e.target.value)}}))}/></div>
       <label>Referral commission %</label><div className="icon-input"><BadgePercent/><input inputMode="decimal" value={draft.settings.referralPercent} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,referralPercent:Math.max(0,Math.min(100,Number(e.target.value)))}}))}/></div>
+      <label>Admin Telegram Username</label><input value={draft.settings.supportUsername||""} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,supportUsername:e.target.value.replace(/^@/,"")}}))} placeholder="e.g. malakzai"/>
       <label>Announcement</label><textarea value={draft.settings.announcement} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,announcement:e.target.value}}))}/>
       <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save All Settings</button>
-      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset Frontend Demo</button>
+      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset App Data</button>
     </section>}
-    {proofView&&<motion.div className="proof-viewer" initial={{opacity:0}} animate={{opacity:1}} onClick={()=>setProofView("")}><div onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setProofView("")}><X/></button><img src={proofView} alt="Payment proof full view"/></div></motion.div>}
   </>
 }
 
@@ -625,10 +625,24 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
   const [amount,setAmount]=useState("");
   const [method,setMethod]=useState(methods[0]?.id||"");
   const [reference,setReference]=useState("");
-  const [proofDataUrl,setProofDataUrl]=useState("");
-  const [proofName,setProofName]=useState("");
+  const [submitted,setSubmitted]=useState<RequestItem|null>(null);
   const selected=methods.find((x:PaymentMethod)=>x.id===method);
   const deposit=type==="deposit";
+
+  function openAdminChat(req:RequestItem){
+    const support=String(state.settings.supportUsername||"").trim().replace(/^@/,"");
+    const details=`AFGlion Deposit Request\nRequest ID: ${req.id}\nAmount: ${money(req.amount)}\nMethod: ${req.method}\nTXID: ${req.reference}`;
+    navigator.clipboard?.writeText(details).catch(()=>{});
+    const w=(window as any).Telegram?.WebApp;
+    if(support){
+      const url="https://t.me/"+support;
+      if(w?.openTelegramLink)w.openTelegramLink(url); else window.open(url,"_blank");
+      return;
+    }
+    const share="https://t.me/share/url?url="+encodeURIComponent("https://t.me/Afglionbot")+"&text="+encodeURIComponent(details+"\n\nPlease send your payment screenshot to the admin.");
+    if(w?.openTelegramLink)w.openTelegramLink(share); else window.open(share,"_blank");
+  }
+
   function submit(e:React.FormEvent){
     e.preventDefault();
     const value=Number(amount);
@@ -636,21 +650,33 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
     const max=deposit?state.settings.maxDeposit:state.settings.maxWithdraw;
     if(!value||value<min||value>max){notify("Amount must be between "+money(min)+" and "+money(max));return}
     if(!selected){notify("Choose a payment method");return}
-    if(!reference.trim()){notify(deposit?"Enter payment reference":"Enter account / wallet details");return}
-    if(deposit&&!proofDataUrl){notify("Payment proof image is required");return}
+    if(!reference.trim()){notify(deposit?"Enter payment reference / TXID":"Enter account / wallet details");return}
     if(!deposit&&state.balance<value){notify("Insufficient balance");return}
-    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0),proofDataUrl:deposit?proofDataUrl:undefined,proofName:deposit?proofName:undefined};
+    const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0)};
     setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,users:s.users.map(u=>u.telegramId===Number(tgId||0)?{...u,balance:deposit?u.balance:Math.max(0,u.balance-value)}:u),requests:[req,...s.requests]}));
-    notify((deposit?"Deposit":"Withdrawal")+" request created");
-    close();
+    if(deposit){setSubmitted(req);notify("Deposit request created")}else{notify("Withdrawal request created");close()}
   }
+
+  if(submitted)return <Modal close={close}>
+    <section className="deposit-success">
+      <span className="success-icon"><Check/></span>
+      <small>REQUEST CREATED</small>
+      <h3>Send your payment screenshot to the admin</h3>
+      <p>Your deposit stays pending until the admin checks your screenshot and TXID.</p>
+      <div className="request-id-box"><span>Request ID</span><b>{submitted.id}</b><button type="button" onClick={()=>{navigator.clipboard?.writeText(submitted.id);notify("Request ID copied")}}><Copy/> Copy</button></div>
+      <div className="deposit-summary"><div><span>Amount</span><b>{money(submitted.amount)}</b></div><div><span>Method</span><b>{submitted.method}</b></div><div><span>TXID</span><b>{submitted.reference}</b></div></div>
+      <button className="gold-button" type="button" onClick={()=>openAdminChat(submitted)}><Radio/> Send Screenshot to Admin</button>
+      <button className="soft-button" type="button" onClick={close}>Done</button>
+    </section>
+  </Modal>;
+
   return <Modal close={close}><form className="money-form" onSubmit={submit}>
     <div className="sheet-head"><div><small>{deposit?"FUND WALLET":"REQUEST PAYOUT"}</small><h3>{deposit?"New Deposit":"New Withdrawal"}</h3></div><button type="button" onClick={close}><X/></button></div>
     <section className="amount-box"><span>Amount ({state.settings.currency})</span><div><b>{state.settings.currencySymbol}</b><input autoFocus inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0"/></div><small>Min {money(deposit?state.settings.minDeposit:state.settings.minWithdraw)} • Max {money(deposit?state.settings.maxDeposit:state.settings.maxWithdraw)}</small></section>
     <label>Payment Method</label><div className="method-picks">{methods.map((m:PaymentMethod)=><button type="button" className={method===m.id?"active":""} key={m.id} onClick={()=>setMethod(m.id)}>{m.name.toLowerCase().includes("momo")?<Smartphone/>:<Landmark/>}<span><b>{m.name}</b><small>{m.kind}</small></span><i/></button>)}</div>
     {selected&&<><section className="payment-number-card"><small>{selected.name} ACCOUNT / NUMBER</small><div><b>{selected.number||"Not configured"}</b><button type="button" disabled={!selected.number} onClick={()=>{if(selected.number){navigator.clipboard?.writeText(selected.number);notify("Payment number copied")}}}><Copy/> Copy</button></div></section><section className="method-info"><ShieldCheck/><span>{selected.details||"Follow the payment instructions shown above."}</span></section></>}
-    <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference":"Enter payout details"}/>
-    {deposit&&<label className="proof-upload"><input type="file" accept="image/*" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith("image/")){notify("Please choose an image");return}if(file.size>1500000){notify("Proof image must be under 1.5 MB");return}const reader=new FileReader();reader.onload=()=>{setProofDataUrl(String(reader.result||""));setProofName(file.name)};reader.readAsDataURL(file)}}/><span className="proof-upload-icon">{proofDataUrl?<Check/>:<Plus/>}</span><div><b>{proofDataUrl?"Proof attached":"Upload payment proof *"}</b><span>{proofName||"JPG, PNG or WEBP • max 1.5 MB"}</span></div>{proofDataUrl&&<img src={proofDataUrl} alt="Proof preview"/>}</label>}
+    <label>{deposit?"Payment reference / TXID":"Account / wallet details"}</label><input value={reference} onChange={e=>setReference(e.target.value)} placeholder={deposit?"Enter reference / TXID":"Enter payout details"}/>
+    {deposit&&<section className="screenshot-instruction"><Radio/><div><b>Screenshot verification</b><span>After submitting this request, send your payment screenshot to the admin in Telegram.</span></div></section>}
     <button className="gold-button" type="submit">{deposit?<ArrowDownToLine/>:<ArrowUpFromLine/>} Submit {deposit?"Deposit":"Withdrawal"}</button>
   </form></Modal>
 }
