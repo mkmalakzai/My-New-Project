@@ -269,7 +269,7 @@ export default function App(){
     const id=tgId||6589090462;
     return "https://t.me/Afglionbot?startapp=ref_"+id;
   }
-  function activatePlan(plan:Plan){
+  async function activatePlan(plan:Plan){
     if(state.balance<plan.price){
       setConfirmPlan(null);
       notify("Balance is too low — deposit first.");
@@ -283,6 +283,10 @@ export default function App(){
       stakes:[{id:uid("stake"),planId:plan.id,planName:plan.name,price:plan.price,dailyReward:plan.dailyReward,durationDays:plan.durationDays,startedAt:now(),claimed:0,status:"active"},...s.stakes],
       transactions:[{id:uid("tx"),type:"stake_activation",amount:-plan.price,status:"completed",createdAt:now(),note:plan.name},...s.transactions]
     }));
+    if(referredBy&&referredBy!==tgId){
+      const reward=Math.round((plan.price*Number(state.settings.referralPercent||0)/100)*100)/100;
+      if(reward>0)await rewardReferral(referredBy,tgId,reward).catch(()=>{});
+    }
     setConfirmPlan(null);
     notify(plan.name+" activated");
   }
