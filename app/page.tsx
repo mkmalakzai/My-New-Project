@@ -9,7 +9,7 @@ import {
   Users,WalletCards,X,Zap
 } from "lucide-react";
 import {
-  ensureRemoteUser,saveRemoteUser,watchRemoteUser,watchGlobal,watchAllUsers,watchReferrals,
+  ensureRemoteUser,saveRemoteUser,loadGlobal,watchRemoteUser,watchGlobal,watchAllUsers,watchReferrals,
   saveGlobalSettings,saveGlobalPlans,saveSecurity,rewardReferral,
   updateRemoteUserBalance,updateRemoteUserBan,updateRemoteRequest
 } from "@/lib/realtime";
