@@ -190,6 +190,46 @@ export default function App(){
   },[toast]);
 
   const isAdmin=!!tgId&&(tgId===state.security.ownerId||state.security.adminIds.includes(tgId));
+  useEffect(()=>{
+    if(!remoteReady||!isAdmin)return;
+    return watchAllUsers(remoteUsers=>{
+      const users:UserRecord[]=remoteUsers.map(u=>({
+        telegramId:u.telegramId,name:u.name,username:u.username,balance:u.balance,
+        vipEarnings:u.vipEarnings,referralEarnings:u.referralEarnings,
+        joinedAt:u.joinedAt,lastSeen:u.lastSeen,banned:u.banned
+      }));
+      const requests:RequestItem[]=remoteUsers.flatMap(u=>u.requests.map((r:any)=>({
+        ...r,userName:u.name,username:u.username,telegramId:u.telegramId
+      }))).sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
+      setState(s=>({...s,users,requests}));
+    });
+  },[remoteReady,isAdmin]);
+
+  useEffect(()=>{
+    if(!remoteReady||!tgId)return;
+    const timer=setTimeout(()=>{
+      const payload:any={
+        name,username,photo,balance:state.balance,vipEarnings:state.vipEarnings,
+        referralEarnings:state.referralEarnings,stakes:state.stakes,transactions:state.transactions
+      };
+      if(!isAdmin)payload.requests=state.requests;
+      saveRemoteUser(tgId,payload).catch(()=>{});
+    },180);
+    return()=>clearTimeout(timer);
+  },[remoteReady,tgId,name,username,photo,state.balance,state.vipEarnings,state.referralEarnings,state.stakes,state.transactions,state.requests,isAdmin]);
+
+  useEffect(()=>{
+    if(!remoteReady||!isAdmin)return;
+    const timer=setTimeout(()=>{
+      Promise.all([
+        saveGlobalSettings(state.settings),
+        saveGlobalPlans(state.plans),
+        saveSecurity(state.security)
+      ]).catch(()=>{});
+    },180);
+    return()=>clearTimeout(timer);
+  },[remoteReady,isAdmin,state.settings,state.plans,state.security]);
+
   const currentUser=state.users.find(u=>u.telegramId===tgId);
   const isBanned=!!tgId&&currentUser?.banned===true&&tgId!==state.security.ownerId;
   const activeStake=state.stakes.find(x=>x.status==="active");
