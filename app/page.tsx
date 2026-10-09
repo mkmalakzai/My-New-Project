@@ -735,7 +735,7 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
     if(w?.openTelegramLink)w.openTelegramLink(share); else window.open(share,"_blank");
   }
 
-  function submit(e:React.FormEvent){
+  async function submit(e:React.FormEvent){
     e.preventDefault();
     const value=Number(amount);
     const min=deposit?state.settings.minDeposit:state.settings.minWithdraw;
@@ -745,7 +745,12 @@ function MoneyForm({type,close,state,setState,notify,methods,name,username,tgId}
     if(!reference.trim()){notify(deposit?"Enter payment reference / TXID":"Enter account / wallet details");return}
     if(!deposit&&state.balance<value){notify("Insufficient balance");return}
     const req:RequestItem={id:uid("req"),type:deposit?"deposit":"withdraw",amount:value,method:selected.name,reference:reference.trim(),status:"pending",createdAt:now(),userName:name||"AFGlion User",username:username||"",telegramId:Number(tgId||0)};
-    setState((s:AppState)=>({...s,balance:deposit?s.balance:s.balance-value,users:s.users.map(u=>u.telegramId===Number(tgId||0)?{...u,balance:deposit?u.balance:Math.max(0,u.balance-value)}:u),requests:[req,...s.requests]}));
+    const nextBalance=deposit?state.balance:state.balance-value;
+    const nextRequests=[req,...state.requests];
+    setState((s:AppState)=>({...s,balance:nextBalance,users:s.users.map(u=>u.telegramId===Number(tgId||0)?{...u,balance:nextBalance}:u),requests:nextRequests}));
+    if(Number(tgId||0)>0){
+      await saveRemoteUser(Number(tgId),{balance:nextBalance,requests:nextRequests}).catch(()=>{});
+    }
     if(deposit){setSubmitted(req);notify("Deposit request created")}else{notify("Withdrawal request created");close()}
   }
 
