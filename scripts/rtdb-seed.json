@@ -1,0 +1,23 @@
+{
+  "settings": {
+    "currency": "AFN",
+    "currencySymbol": "؋",
+    "minDeposit": 100,
+    "maxDeposit": 100000,
+    "minWithdraw": 100,
+    "maxWithdraw": 50000,
+    "referralPercent": 5,
+    "announcement": "Welcome to AFGlion — your premium finance dashboard.",
+    "supportUsername": "",
+    "channels": [],
+    "paymentMethods": [
+      {"id":"hesab-pay","name":"HESAB PAY","number":"","details":"Add payment instructions here.","active":true,"kind":"both"},
+      {"id":"momo","name":"MOMO","number":"","details":"Add payment instructions here.","active":true,"kind":"both"}
+    ]
+  },
+  "plans": [
+    {"id":"lion-start","name":"Lion Start","price":1000,"dailyReward":8,"durationDays":30,"badge":"START","active":true},
+    {"id":"lion-pro","name":"Lion Pro","price":3000,"dailyReward":27,"durationDays":60,"badge":"POPULAR","active":true},
+    {"id":"lion-elite","name":"Lion Elite","price":6000,"dailyReward":60,"durationDays":90,"badge":"ELITE","active":true}
+  ]
+}
