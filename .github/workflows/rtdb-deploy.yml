@@ -1,0 +1,52 @@
+name: AFGlion RTDB Deploy
+on:
+  push:
+    branches: [afglion-rtdb-fix]
+    paths:
+      - "database.rules.json"
+      - "scripts/rtdb-seed.json"
+      - ".github/workflows/rtdb-deploy.yml"
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: afglion-47b07
+      DB_URL: https://afglion-47b07-default-rtdb.asia-southeast1.firebasedatabase.app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy rules and seed defaults
+        shell: bash
+        run: |
+          set -e
+          TOKEN="$(gcloud auth print-access-token)"
+
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @database.rules.json \
+            "$DB_URL/.settings/rules.json"
+
+          CONFIG="$(curl -fsS -H "Authorization: Bearer $TOKEN" "$DB_URL/config.json")"
+          if [ "$CONFIG" = "null" ]; then
+            curl -fsS -X PUT \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @scripts/rtdb-seed.json \
+              "$DB_URL/config.json"
+          fi
+
+          SECURITY="$(curl -fsS -H "Authorization: Bearer $TOKEN" "$DB_URL/security.json")"
+          if [ "$SECURITY" = "null" ]; then
+            curl -fsS -X PUT \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"ownerId":6589090462,"adminIds":[]}' \
+              "$DB_URL/security.json"
+          fi
+
+          echo "RTDB rules and defaults ready."
