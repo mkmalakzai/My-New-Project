@@ -1,10 +1,10 @@
-name: AFGlion RTDB Check
+name: AFGlion RTDB Setup
 on:
   push:
     branches: [afglion-rtdb-fix]
   workflow_dispatch:
 jobs:
-  check:
+  setup:
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: afglion-47b07
@@ -14,12 +14,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Enable Realtime Database API
+        run: gcloud services enable firebasedatabase.googleapis.com --project "$PROJECT_ID"
       - run: npm install -g firebase-tools
-      - name: Configure Firebase auth
+      - name: Configure Firebase CLI auth
         shell: bash
         run: |
           printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
-      - name: List Realtime Database instances
+      - name: Create or list Realtime Database
+        shell: bash
         run: |
-          firebase database:instances:list --project "$PROJECT_ID" || { cat firebase-debug.log || true; exit 1; }
+          set -e
+          if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
+            firebase database:instances:list --project "$PROJECT_ID"
+          else
+            firebase database:instances:create afglion-47b07-default-rtdb --location us-central1 --project "$PROJECT_ID"
+            firebase database:instances:list --project "$PROJECT_ID"
+          fi
