@@ -8,34 +8,37 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: afglion-47b07
+      PROJECT_NUMBER: "226343766461"
+      DATABASE_ID: afglion-47b07-default-rtdb
       FIREBASE_SA_PRIMARY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AFGLION_47B07 }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: Enable Realtime Database API
         run: gcloud services enable firebasedatabase.googleapis.com --project "$PROJECT_ID"
-      - run: npm install -g firebase-tools
-      - name: Configure Firebase CLI auth
-        shell: bash
-        run: |
-          printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
-      - name: Install expect
-        run: sudo apt-get update -qq && sudo apt-get install -y expect
-      - name: Initialize or list Realtime Database
+      - name: Create default Realtime Database if missing
         shell: bash
         run: |
           set -e
-          if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
-            firebase database:instances:list --project "$PROJECT_ID"
-          else
-            printf '%s\n'               'set timeout 180'               'spawn firebase init database --project $env(PROJECT_ID)'               'expect {'               '  -re "Are you ready to proceed" { send "y\\r"; exp_continue }'               '  -re "Please choose the location for your default Realtime Database instance:" { send "\\r"; exp_continue }'               '  -re "What file should be used for Realtime Database Security Rules" { send "\\r"; exp_continue }'               '  -re "already exists. Do you want to overwrite it" { send "n\\r"; exp_continue }'               '  eof'               '}' > /tmp/firebase-init.exp
-            expect /tmp/firebase-init.exp
-            firebase database:instances:list --project "$PROJECT_ID"
+          TOKEN="$(gcloud auth print-access-token)"
+          LIST="$(curl -fsS -H "Authorization: Bearer $TOKEN" "https://firebasedatabase.googleapis.com/v1beta/projects/$PROJECT_ID/locations/-/instances")"
+          if echo "$LIST" | grep -q "\"name\": \"projects/$PROJECT_NUMBER/locations/"; then
+            echo "$LIST"
+            exit 0
           fi
+          HTTP_CODE="$(curl -sS -o /tmp/rtdb-create.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://firebasedatabase.googleapis.com/v1beta/projects/$PROJECT_ID/locations/asia-southeast1/instances?databaseId=$DATABASE_ID" \
+            -d '{"type":"DEFAULT_DATABASE"}')"
+          cat /tmp/rtdb-create.json
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "RTDB create failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+          sleep 8
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://firebasedatabase.googleapis.com/v1beta/projects/$PROJECT_ID/locations/-/instances"
