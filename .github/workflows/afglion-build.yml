@@ -1,7 +1,7 @@
 name: AFGlion Build Check
 on:
   push:
-    branches: [main, afglion-rtdb-fix]
+    branches: [main]
   workflow_dispatch:
 jobs:
   build:
