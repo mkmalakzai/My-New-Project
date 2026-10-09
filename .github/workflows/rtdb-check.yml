@@ -33,6 +33,6 @@ jobs:
           if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
             firebase database:instances:list --project "$PROJECT_ID"
           else
-            printf '\n\n\n' | firebase init database --project "$PROJECT_ID" --force
+            printf '\n\n\n' | firebase init database --project "$PROJECT_ID"
             firebase database:instances:list --project "$PROJECT_ID"
           fi
