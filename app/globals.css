@@ -173,3 +173,32 @@ radial-gradient(circle at 0 30%,rgba(228,182,84,.045),transparent 22%),#080808}
 }
 
 .restricted-card{width:min(360px,calc(100% - 28px));padding:25px 20px;border:1px solid #452727;border-radius:20px;background:linear-gradient(145deg,#171010,#0d0d0d);text-align:center;box-shadow:0 18px 60px rgba(0,0,0,.45)}.restricted-card>svg{width:30px;margin:0 auto 9px;color:#d77f7f}.restricted-card h2{margin:0;font-size:18px}.restricted-card p{margin:6px 0 10px;font-size:9px;line-height:1.5;color:#8b7070}.restricted-card small{font-size:7px;color:#695f5f}
+
+/* launch screenshot verification flow */
+.screenshot-instruction,.telegram-proof-note{display:flex;align-items:flex-start;gap:9px;padding:11px;border:1px solid rgba(228,182,84,.18);border-radius:12px;background:linear-gradient(135deg,#15120d,#0d0d0d)}
+.screenshot-instruction>svg,.telegram-proof-note>svg{width:16px;flex:none;color:var(--gold)}
+.screenshot-instruction>div,.telegram-proof-note>div{flex:1}
+.screenshot-instruction b,.screenshot-instruction span,.telegram-proof-note b,.telegram-proof-note span{display:block}
+.screenshot-instruction b,.telegram-proof-note b{font-size:8px}
+.screenshot-instruction span,.telegram-proof-note span{margin-top:3px;font-size:7px;line-height:1.45;color:#6d685f}
+
+.deposit-success{text-align:center}
+.success-icon{display:grid;place-items:center;width:58px;height:58px;margin:2px auto 9px;border-radius:18px;background:#142012;color:#8fbe7e;border:1px solid #2c4827}
+.success-icon svg{width:25px}
+.deposit-success>small{display:block;font-size:7px;letter-spacing:1.2px;color:#8d7546}
+.deposit-success h3{margin:5px 0;font-size:18px;line-height:1.25}
+.deposit-success>p{max-width:350px;margin:0 auto 14px;font-size:8px;line-height:1.5;color:#6e6962}
+.request-id-box{display:grid;grid-template-columns:1fr auto;gap:5px;padding:11px;border:1px solid #2a241a;border-radius:13px;background:#0d0c09;text-align:left}
+.request-id-box>span{grid-column:1/-1;font-size:6px;color:#777067}
+.request-id-box>b{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;color:#d9b565;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.request-id-box>button{display:flex;align-items:center;gap:4px;padding:6px 8px;border:1px solid #3b301f;border-radius:8px;background:#1a160e;color:#d9ae51;font-size:7px}
+.request-id-box>button svg{width:11px}
+.deposit-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0 12px}
+.deposit-summary>div{padding:9px 6px;border:1px solid #1f1f1f;border-radius:10px;background:#0d0d0d}
+.deposit-summary span,.deposit-summary b{display:block}.deposit-summary span{font-size:6px;color:#6d685f}.deposit-summary b{margin-top:3px;font-size:8px;word-break:break-word}
+.deposit-success .gold-button{margin-top:2px}
+.deposit-success .soft-button{margin-top:7px}
+
+@media(max-width:390px){
+  .deposit-summary{grid-template-columns:1fr}
+}
