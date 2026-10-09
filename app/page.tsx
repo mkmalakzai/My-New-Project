@@ -557,44 +557,34 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
   function removeMethod(id:string){
     setDraft(s=>({...s,settings:{...s.settings,paymentMethods:s.settings.paymentMethods.filter(x=>x.id!==id)}}));
   }
-  function reviewRequest(id:string,approve:boolean){
-    setState(s=>{
-      const req=s.requests.find(x=>x.id===id);
-      if(!req||req.status!=="pending")return s;
-      const userId=Number(req.telegramId||0);
-      let balance=s.balance;
-      let transactions=s.transactions;
-      let users=s.users;
-      if(approve&&req.type==="deposit"){
-        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
-        if(userId===viewerId)balance+=req.amount;
-        transactions=[{id:uid("tx"),type:"deposit",amount:req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      }
-      if(!approve&&req.type==="withdraw"){
-        users=s.users.map(u=>u.telegramId===userId?{...u,balance:u.balance+req.amount}:u);
-        if(userId===viewerId)balance+=req.amount;
-      }
-      if(approve&&req.type==="withdraw"){
-        transactions=[{id:uid("tx"),type:"withdrawal",amount:-req.amount,status:"completed",createdAt:now(),note:req.method},...transactions];
-      }
-      return {...s,balance,users,transactions,requests:s.requests.map(x=>x.id===id?{...x,status:approve?"approved":"rejected"}:x)};
-    });
-    notify(approve?"Request approved":"Request rejected");
+  async function reviewRequest(id:string,approve:boolean){
+    const req=state.requests.find(x=>x.id===id);
+    if(!req||req.status!=="pending"||!req.telegramId)return;
+    try{
+      await reviewRemoteRequest(Number(req.telegramId),id,approve);
+      notify(approve?"Request approved":"Request rejected");
+    }catch{notify("Request update failed")}
   }
-  function adjustUserBalance(id:number,mode:"add"|"remove"){
+  async function adjustUserBalance(id:number,mode:"add"|"remove"){
     const amount=Number(balanceEdits[id]||0);
     if(!amount||amount<=0){notify("Enter a valid amount");return}
-    setState(s=>{
-      const target=s.users.find(u=>u.telegramId===id); if(!target)return s;
-      const next=mode==="add"?target.balance+amount:Math.max(0,target.balance-amount);
-      return {...s,balance:id===viewerId?next:s.balance,users:s.users.map(u=>u.telegramId===id?{...u,balance:next}:u)};
-    });
-    setBalanceEdits(v=>({...v,[id]:""}));
-    notify(mode==="add"?"Balance added":"Balance removed");
+    const target=state.users.find(u=>u.telegramId===id);
+    if(!target){notify("User not found");return}
+    const next=mode==="add"?target.balance+amount:Math.max(0,target.balance-amount);
+    try{
+      await updateRemoteUserBalance(id,next);
+      setBalanceEdits(v=>({...v,[id]:""}));
+      notify(mode==="add"?"Balance added":"Balance removed");
+    }catch{notify("Balance update failed")}
   }
-  function toggleBan(id:number){
+  async function toggleBan(id:number){
     if(id===state.security.ownerId){notify("Owner cannot be banned");return}
-    setState(s=>({...s,users:s.users.map(u=>u.telegramId===id?{...u,banned:!u.banned}:u)}));
+    const target=state.users.find(u=>u.telegramId===id);
+    if(!target)return;
+    try{
+      await updateRemoteUserBan(id,!target.banned);
+      notify(target.banned?"User unbanned":"User banned");
+    }catch{notify("User update failed")}
   }
   function addAdmin(){
     if(!isOwner){notify("Only the owner can manage admins");return}
@@ -615,8 +605,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
     setTransferId("");notify("Ownership transferred");
   }
   function reset(){
-    const next=cloneDefault();
-    setDraft(next);setState(next);notify("AFGlion data reset");
+    window.location.reload();
   }
 
   return <>
@@ -713,7 +702,7 @@ function AdminView({state,setState,section,setSection,notify,onBack,viewerId}:{s
       <label>Admin Telegram Username</label><input value={draft.settings.supportUsername||""} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,supportUsername:e.target.value.replace(/^@/,"")}}))} placeholder="e.g. malakzai"/>
       <label>Announcement</label><textarea value={draft.settings.announcement} onChange={e=>setDraft(s=>({...s,settings:{...s.settings,announcement:e.target.value}}))}/>
       <button className="gold-button" type="button" onClick={saveSettings}><Check/> Save All Settings</button>
-      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reset App Data</button>
+      <button className="danger-button" type="button" onClick={reset}><RefreshCw/> Reload from Database</button>
     </section>}
   </>
 }
