@@ -35,17 +35,7 @@ jobs:
           if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
             firebase database:instances:list --project "$PROJECT_ID"
           else
-            cat > /tmp/firebase-init.exp <<'EOF'
-            set timeout 180
-            spawn firebase init database --project $env(PROJECT_ID)
-            expect {
-              -re "Are you ready to proceed" { send "y\r"; exp_continue }
-              -re "Please choose the location for your default Realtime Database instance:" { send "\r"; exp_continue }
-              -re "What file should be used for Realtime Database Security Rules" { send "\r"; exp_continue }
-              -re "already exists. Do you want to overwrite it" { send "n\r"; exp_continue }
-              eof
-            }
-            EOF
+            printf '%s\n'               'set timeout 180'               'spawn firebase init database --project $env(PROJECT_ID)'               'expect {'               '  -re "Are you ready to proceed" { send "y\\r"; exp_continue }'               '  -re "Please choose the location for your default Realtime Database instance:" { send "\\r"; exp_continue }'               '  -re "What file should be used for Realtime Database Security Rules" { send "\\r"; exp_continue }'               '  -re "already exists. Do you want to overwrite it" { send "n\\r"; exp_continue }'               '  eof'               '}' > /tmp/firebase-init.exp
             expect /tmp/firebase-init.exp
             firebase database:instances:list --project "$PROJECT_ID"
           fi
