@@ -26,6 +26,8 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+      - name: Install expect
+        run: sudo apt-get update -qq && sudo apt-get install -y expect
       - name: Initialize or list Realtime Database
         shell: bash
         run: |
@@ -33,6 +35,17 @@ jobs:
           if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
             firebase database:instances:list --project "$PROJECT_ID"
           else
-            printf '\n\n\n' | firebase init database --project "$PROJECT_ID"
+            cat > /tmp/firebase-init.exp <<'EOF'
+            set timeout 180
+            spawn firebase init database --project $env(PROJECT_ID)
+            expect {
+              -re "Are you ready to proceed" { send "y\r"; exp_continue }
+              -re "Please choose the location for your default Realtime Database instance:" { send "\r"; exp_continue }
+              -re "What file should be used for Realtime Database Security Rules" { send "\r"; exp_continue }
+              -re "already exists. Do you want to overwrite it" { send "n\r"; exp_continue }
+              eof
+            }
+            EOF
+            expect /tmp/firebase-init.exp
             firebase database:instances:list --project "$PROJECT_ID"
           fi
