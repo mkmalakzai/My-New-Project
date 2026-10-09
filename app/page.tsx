@@ -85,48 +85,103 @@ export default function App(){
   const [name,setName]=useState("AFGlion Guest");
   const [username,setUsername]=useState("");
   const [photo,setPhoto]=useState("");
-  const [adminPreview,setAdminPreview]=useState(false);
+  const [remoteReady,setRemoteReady]=useState(false);
+  const [referredBy,setReferredBy]=useState<number|null>(null);
   const [confirmPlan,setConfirmPlan]=useState<Plan|null>(null);
 
-  useEffect(()=>{
-    try{
-      const raw=localStorage.getItem(STORE_KEY);
-      if(raw){
-        const parsed=JSON.parse(raw);
-        setState({...cloneDefault(),...parsed,settings:{...cloneDefault().settings,...parsed.settings}});
-      }
-    }catch{}
-    const params=new URLSearchParams(window.location.search);
-    setAdminPreview(params.get("admin")==="true");
+  useEffect(()=>{let cancelled=false;(async()=>{
     const w=(window as any).Telegram?.WebApp;
     const u=w?.initDataUnsafe?.user;
-    if(u?.id){
-      setTgId(Number(u.id));
-      setName(u.first_name||"AFGlion User");
-      setUsername(u.username||"");
-      setPhoto(u.photo_url||"");
-      w?.ready?.(); w?.expand?.();
-      w?.setHeaderColor?.("#080808"); w?.setBackgroundColor?.("#080808");
+    if(!u?.id){
+      if(!cancelled)setReady(true);
+      return;
     }
+
+    const id=Number(u.id);
+    const firstName=u.first_name||"AFGlion User";
+    const uname=u.username||"";
+    const avatar=u.photo_url||"";
+    setTgId(id);setName(firstName);setUsername(uname);setPhoto(avatar);
+    w?.ready?.();w?.expand?.();w?.setHeaderColor?.("#080808");w?.setBackgroundColor?.("#080808");
+
+    const raw=String(w?.initDataUnsafe?.start_param||"");
+    const refId=raw.startsWith("ref_")?Number(raw.slice(4)):null;
+    const ensured=await ensureRemoteUser({telegramId:id,name:firstName,username:uname,photo:avatar,referredBy:refId});
+
+    let user=ensured.user;
+    if(ensured.created&&id===OWNER_ID){
+      try{
+        const oldRaw=localStorage.getItem("afglion_frontend_v4");
+        if(oldRaw){
+          const old=JSON.parse(oldRaw);
+          const migrated={
+            balance:Number(old.balance||0),
+            vipEarnings:Number(old.vipEarnings||0),
+            referralEarnings:Number(old.referralEarnings||0),
+            stakes:Array.isArray(old.stakes)?old.stakes:[],
+            transactions:Array.isArray(old.transactions)?old.transactions:[],
+            requests:Array.isArray(old.requests)?old.requests:[]
+          };
+          await saveRemoteUser(id,migrated);
+          user={...user,...migrated};
+        }
+      }catch{}
+    }
+    try{localStorage.removeItem("afglion_frontend_v4")}catch{}
+
+    const global=await loadGlobal();
+    if(cancelled)return;
+    setReferredBy(user.referredBy||null);
+    setState(s=>({
+      ...s,
+      balance:user.balance,
+      vipEarnings:user.vipEarnings,
+      referralEarnings:user.referralEarnings,
+      stakes:user.stakes as Stake[],
+      transactions:user.transactions as Tx[],
+      requests:user.requests as RequestItem[],
+      users:[{telegramId:id,name:firstName,username:uname,balance:user.balance,vipEarnings:user.vipEarnings,referralEarnings:user.referralEarnings,joinedAt:user.joinedAt,lastSeen:user.lastSeen,banned:user.banned}],
+      settings:global.settings?{...s.settings,...global.settings}:s.settings,
+      plans:global.plans?.length?global.plans:s.plans,
+      security:global.security?{ownerId:Number(global.security.ownerId||OWNER_ID),adminIds:(global.security.adminIds||[]).map(Number)}:s.security
+    }));
+    setRemoteReady(true);
     setReady(true);
-  },[]);
+  })().catch(()=>{if(!cancelled)setReady(true)});return()=>{cancelled=true}},[]);
 
   useEffect(()=>{
-    if(!ready)return;
-    localStorage.setItem(STORE_KEY,JSON.stringify(state));
-  },[state,ready]);
-
-  useEffect(()=>{
-    if(!ready||!tgId)return;
-    setState(s=>{
-      const found=s.users.find(x=>x.telegramId===tgId);
-      if(found){
-        return {...s,users:s.users.map(x=>x.telegramId===tgId?{...x,name,username,lastSeen:now(),balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings}:x)};
-      }
-      const user:UserRecord={telegramId:tgId,name,username,balance:s.balance,vipEarnings:s.vipEarnings,referralEarnings:s.referralEarnings,joinedAt:now(),lastSeen:now(),banned:false};
-      return {...s,users:[user,...s.users]};
+    if(!remoteReady||!tgId)return;
+    return watchRemoteUser(tgId,user=>{
+      setReferredBy(user.referredBy||null);
+      setState(s=>({
+        ...s,
+        balance:user.balance,
+        vipEarnings:user.vipEarnings,
+        referralEarnings:user.referralEarnings,
+        stakes:user.stakes as Stake[],
+        transactions:user.transactions as Tx[],
+        requests:user.requests as RequestItem[],
+        users:s.users.some(x=>x.telegramId===tgId)
+          ?s.users.map(x=>x.telegramId===tgId?{telegramId:tgId,name:user.name,username:user.username,balance:user.balance,vipEarnings:user.vipEarnings,referralEarnings:user.referralEarnings,joinedAt:user.joinedAt,lastSeen:user.lastSeen,banned:user.banned}:x)
+          :[{telegramId:tgId,name:user.name,username:user.username,balance:user.balance,vipEarnings:user.vipEarnings,referralEarnings:user.referralEarnings,joinedAt:user.joinedAt,lastSeen:user.lastSeen,banned:user.banned},...s.users]
+      }));
     });
-  },[ready,tgId,name,username]);
+  },[remoteReady,tgId]);
+
+  useEffect(()=>{
+    if(!remoteReady)return;
+    return watchGlobal(global=>setState(s=>({
+      ...s,
+      settings:global.settings?{...s.settings,...global.settings}:s.settings,
+      plans:global.plans?.length?global.plans:s.plans,
+      security:global.security?{ownerId:Number(global.security.ownerId||OWNER_ID),adminIds:(global.security.adminIds||[]).map(Number)}:s.security
+    })));
+  },[remoteReady]);
+
+  useEffect(()=>{
+    if(!remoteReady||!tgId)return;
+    return watchReferrals(tgId,(items:any[])=>setState(s=>({...s,referrals:items as ReferralItem[]})));
+  },[remoteReady,tgId]);
 
   useEffect(()=>{
     if(!toast)return;
@@ -134,7 +189,7 @@ export default function App(){
     return()=>clearTimeout(t);
   },[toast]);
 
-  const isAdmin=adminPreview||tgId===state.security.ownerId||state.security.adminIds.includes(tgId);
+  const isAdmin=!!tgId&&(tgId===state.security.ownerId||state.security.adminIds.includes(tgId));
   const currentUser=state.users.find(u=>u.telegramId===tgId);
   const isBanned=!!tgId&&currentUser?.banned===true&&tgId!==state.security.ownerId;
   const activeStake=state.stakes.find(x=>x.status==="active");
