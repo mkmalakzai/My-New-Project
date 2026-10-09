@@ -26,13 +26,13 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_SA_PRIMARY" > "$RUNNER_TEMP/firebase-sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
-      - name: Create or list Realtime Database
+      - name: Initialize or list Realtime Database
         shell: bash
         run: |
           set -e
           if firebase database:instances:list --project "$PROJECT_ID" | grep -q "afglion-47b07"; then
             firebase database:instances:list --project "$PROJECT_ID"
           else
-            firebase database:instances:create afglion-47b07-default-rtdb --location us-central1 --project "$PROJECT_ID"
+            printf '\n\n\n' | firebase init database --project "$PROJECT_ID" --force
             firebase database:instances:list --project "$PROJECT_ID"
           fi
